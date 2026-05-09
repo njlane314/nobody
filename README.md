@@ -58,6 +58,7 @@ network, MCP, or browser-control enforcement in this milestone.
 
 ## Documentation
 
+- [Design note](docs/design.html)
 - [Policy format](docs/policy.md)
 - [Trace format](docs/trace.md)
 - [Examples](docs/examples.md)

@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nobody: design note</title>
+  <meta name="description" content="An architectural design note for nobody, a least-privilege runtime for autonomous software." />
+  <style>
+    :root {
+      --ink: #000;
+      --muted: #4d4d4d;
+      --rule: #9a9a9a;
+      --soft-rule: #dedede;
+      --paper: #fff;
+      --example: #f7f7f7;
+      --blue: #174ea6;
+      --blue-rule: #b8c8e6;
+      --blue-soft: #eef4ff;
+      --note: #f8fbff;
+      --warning: #fff4f0;
+      --link: #0645ad;
+      --visited: #551a8b;
+      --text: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--text);
+      font-size: 16px;
+      line-height: 1.54;
+    }
+
+    a { color: var(--link); }
+    a:visited { color: var(--visited); }
+    a:hover { text-decoration: none; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      max-width: 1320px;
+      margin: 0 auto;
+      background: var(--paper);
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      min-height: 100vh;
+      padding: 24px 16px;
+      border-right: 1px solid var(--soft-rule);
+      background: var(--paper);
+      font-size: 12px;
+      line-height: 1.42;
+    }
+
+    .brand {
+      margin: 0 0 6px;
+      color: var(--blue);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .brand-subtitle {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .toc-title {
+      margin: 14px 0 6px;
+      color: var(--blue);
+      font-weight: bold;
+      text-transform: lowercase;
+    }
+
+    nav a {
+      display: block;
+      padding: 2px 0;
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    nav a:hover { text-decoration: underline; }
+    nav a.indent {
+      padding-left: 14px;
+      color: #355f9b;
+      font-weight: normal;
+    }
+
+    main {
+      background: var(--paper);
+      padding: 26px 32px 56px;
+    }
+
+    article {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 0;
+      background: var(--paper);
+    }
+
+    header.doc-header {
+      border-bottom: 2px solid var(--blue);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    h1, h2, h3, h4 {
+      font: inherit;
+      font-weight: bold;
+      line-height: 1.25;
+      color: var(--blue);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 29px;
+    }
+
+    h2 {
+      margin: 28px 0 8px;
+      padding-top: 14px;
+      border-top: 2px solid var(--blue-soft);
+      font-size: 22px;
+    }
+
+    h3 {
+      margin: 20px 0 6px;
+      color: #0f4f82;
+      font-size: 17px;
+    }
+
+    h4 {
+      margin: 16px 0 5px;
+      color: var(--blue);
+      font-size: 16px;
+    }
+
+    p { margin: 0 0 11px; }
+
+    .subtitle {
+      max-width: 920px;
+      margin: 0;
+      color: var(--ink);
+      font-size: 16px;
+      font-style: italic;
+      line-height: 1.5;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+      padding-top: 8px;
+      border-top: 1px solid var(--soft-rule);
+      font-size: 12px;
+    }
+
+    .meta b {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--blue);
+      font-weight: bold;
+      text-transform: lowercase;
+    }
+
+    .abstract,
+    .note,
+    .box,
+    .definition,
+    .warning,
+    .math,
+    .diagram,
+    .card,
+    .statement {
+      background: #fff;
+      border: 1px solid var(--rule);
+    }
+
+    .abstract,
+    .note,
+    .definition,
+    .warning,
+    .card {
+      padding: 12px 14px;
+      margin: 10px 0 14px;
+    }
+
+    .statement {
+      margin: 12px 0 16px;
+      padding: 10px 14px;
+      background: var(--blue-soft);
+      border-left: 4px solid var(--blue);
+      color: var(--ink);
+      font-weight: bold;
+    }
+
+    .abstract,
+    .note,
+    .card {
+      background: var(--note);
+      border-color: var(--blue-rule);
+    }
+    .warning {
+      background: var(--warning);
+      border-left: 4px solid var(--ink);
+    }
+    .definition {
+      background: var(--note);
+      border-left: 4px double var(--blue);
+    }
+
+    code, pre, .math, .diagram {
+      font-family: var(--mono);
+      font-variant-ligatures: none;
+    }
+
+    code {
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    pre {
+      overflow-x: auto;
+      background: var(--example);
+      color: var(--ink);
+      border: 1px solid var(--blue-rule);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 10px 0 14px;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+      font-weight: 400;
+    }
+
+    .math {
+      overflow-x: auto;
+      white-space: nowrap;
+      background: var(--example);
+      color: var(--ink);
+      border-color: var(--blue-rule);
+      padding: 9px 12px;
+      margin: 10px 0 14px;
+      font-size: 13px;
+    }
+
+    .diagram {
+      white-space: pre;
+      overflow-x: auto;
+      background: var(--example);
+      border-color: var(--blue-rule);
+      padding: 10px 12px;
+      margin: 10px 0 14px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 18px;
+      background: var(--paper);
+      font-size: 13px;
+      line-height: 1.42;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-top: 1px solid var(--soft-rule);
+      border-bottom: 1px solid var(--soft-rule);
+      padding: 7px 7px;
+    }
+
+    th {
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: bold;
+    }
+
+    tbody tr:nth-child(even) { background: #fbfbfb; }
+
+    ul, ol { margin: 6px 0 13px; padding-left: 22px; }
+    li { margin: 3px 0; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 10px 0 16px;
+    }
+
+    .label {
+      display: inline-block;
+      border: 1px solid var(--blue-rule);
+      padding: 0 5px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .subsystem-map {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 10px 0 18px;
+      font-size: 13px;
+    }
+
+    .subsystem-map div {
+      border: 1px solid var(--blue-rule);
+      background: var(--paper);
+      padding: 9px;
+      min-height: 82px;
+    }
+
+    .subsystem-map b {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--blue);
+      font-weight: bold;
+    }
+    .references li { margin-bottom: 8px; }
+
+    footer {
+      border-top: 1px solid var(--rule);
+      margin-top: 32px;
+      padding-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 920px) {
+      .shell { display: block; }
+      aside {
+        position: relative;
+        min-height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--soft-rule);
+      }
+      nav { columns: 2; column-gap: 24px; }
+      main { padding: 24px 18px 54px; }
+      .meta, .grid-2, .subsystem-map { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      body { font-size: 11pt; }
+      .shell { display: block; max-width: none; }
+      aside { display: none; }
+      main { padding: 0; }
+      article { max-width: none; }
+      a { color: #000; text-decoration: none; }
+      pre, .diagram { white-space: pre-wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside aria-label="Table of contents">
+      <div class="brand">nobody</div>
+      <div class="brand-subtitle">A design note on authority, execution, and evidence.</div>
+      <div class="toc-title">contents</div>
+      <nav>
+        <a href="#abstract">Abstract</a>
+        <a href="#status">Current status</a>
+        <a href="#claim">1. Claim</a>
+        <a href="#problem">2. Problem</a>
+        <a href="#intent">3. Intent</a>
+        <a class="indent" href="#compression">3.1 Compression target</a>
+        <a href="#principles">4. Design principles</a>
+        <a href="#model">5. Model</a>
+        <a class="indent" href="#authority">5.1 Authority relation</a>
+        <a class="indent" href="#run">5.2 Run</a>
+        <a href="#architecture">6. Architecture</a>
+        <a class="indent" href="#subsystems">6.1 Subsystems</a>
+        <a class="indent" href="#trusted-core">6.2 Trusted core</a>
+        <a href="#mechanisms">7. Mechanisms</a>
+        <a href="#policy">8. Policy</a>
+        <a href="#trace">9. Trace</a>
+        <a href="#ui">10. Interface</a>
+        <a href="#threat-model">11. Threat model</a>
+        <a href="#enterprise">12. Enterprise form</a>
+        <a href="#non-goals">13. Non-goals</a>
+        <a href="#roadmap">14. Roadmap</a>
+        <a href="#references">References</a>
+      </nav>
+    </aside>
+
+    <main>
+      <article>
+        <header class="doc-header">
+          <div class="eyebrow">design note / draft 0.2</div>
+          <h1>nobody: a least-privilege runtime for autonomous software</h1>
+          <p class="subtitle">
+            This document is not a manual. It is a note on the architecture of a program whose job is to turn inherited authority into declared authority.
+          </p>
+          <div class="meta">
+            <div><b>object</b>execution boundary</div>
+            <div><b>interface</b><code>nobody run</code></div>
+            <div><b>first platform</b>Linux</div>
+            <div><b>status</b>prototype, not sandbox</div>
+          </div>
+        </header>
+
+        <section id="abstract">
+          <h2>Abstract</h2>
+          <div class="abstract">
+            <p>
+              <code>nobody</code> is a least-privilege runtime for agents, tools, MCP servers, and commands. It receives a subject to execute and a policy describing the authority that subject may exercise. It then constructs a confinement plan, starts the subject inside that boundary, mediates requests that cannot be handled by the kernel, and records the run as structured evidence.
+            </p>
+            <p>
+              The motivating defect is ambient authority: the tendency of a process to inherit the broad authority of the user who launched it. The design goal is to replace such inheritance with explicit capabilities over files, commands, network destinations, secrets, and tools.
+            </p>
+          </div>
+        </section>
+
+        <section id="status">
+          <h2>Current status</h2>
+          <div class="warning">
+            <p>
+              The repository is a prototype. It parses policy, gates shell commands through an allow/deny list, runs allowed commands, and records JSONL trace events. It does not yet apply Landlock, seccomp, namespaces, cgroups, network mediation, MCP mediation, browser mediation, or secret brokering.
+            </p>
+          </div>
+          <table>
+            <thead><tr><th>Layer</th><th>Current repository</th><th>Intended design</th></tr></thead>
+            <tbody>
+              <tr><td>Authority</td><td>Policy file with shell allow/deny lists.</td><td>Typed capabilities for files, processes, network, tools, secrets, and approvals.</td></tr>
+              <tr><td>Enforcement</td><td>Command gate before process launch.</td><td>Kernel restrictions, mandatory proxies, overlays, and approval suspension points.</td></tr>
+              <tr><td>Evidence</td><td>Append-only JSONL run trace.</td><td>Versioned trace schema, replay, diff, audit export, and rule-level explanations.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="claim">
+          <h2>1. Claim</h2>
+          <p class="statement">
+            An autonomous program should possess no authority not named in the policy for its current run.
+          </p>
+          <p>
+            This claim is stronger than logging. It is also narrower than general containerization. The relevant question is not whether a process is placed in a container, but which operations it is allowed to perform and whether the system can explain each decision.
+          </p>
+          <p>
+            A useful runtime must therefore make three things precise: the grant of authority, the mechanism that enforces the grant, and the evidence left behind after execution.
+          </p>
+          <table>
+            <thead><tr><th>Claim part</th><th>Inspectable object</th><th>Prototype evidence</th></tr></thead>
+            <tbody>
+              <tr><td>Declared authority</td><td><code>nobody.toml</code> policy.</td><td>Allowed and denied shell command lists.</td></tr>
+              <tr><td>Enforcement decision</td><td>Runtime allow/deny result.</td><td>Denied command exits before execution.</td></tr>
+              <tr><td>Trace evidence</td><td><code>.nobody/runs/latest.jsonl</code>.</td><td>Run start, policy decision, command result, and run exit events.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="problem">
+          <h2>2. Problem</h2>
+          <p>
+            A developer shell is an authority-rich environment. It usually has access to source code, environment variables, SSH keys, cloud credentials, package registries, browsers, local sockets, internal networks, and collaboration tools. A conventional program launched from that shell inherits much of this authority without a separate act of delegation.
+          </p>
+          <p>
+            This model was imprecise for ordinary programs. It is more dangerous for agents. An agent can inspect a problem, generate commands, call tools, retry after failure, and combine local and remote actions. The human remains responsible for the consequences, but the human does not necessarily enumerate the intermediate actions.
+          </p>
+          <p>
+            The resulting failure mode is not merely malicious behavior. It is also ordinary error under excessive authority: reading the wrong file, leaking context to the wrong endpoint, invoking the wrong tool, running a destructive command, or using a secret in a context where the user did not intend it to appear.
+          </p>
+        </section>
+
+        <section id="intent">
+          <h2>3. Intent</h2>
+          <p>
+            The intended object is an execution boundary. <code>nobody</code> should sit between an agent and the machine, in the same sense that a shell sits between a user and programs. It should not decide how an agent thinks. It should decide what the agent is permitted to do.
+          </p>
+          <pre><code>nobody run --policy policy.toml -- &lt;agent-or-command&gt;</code></pre>
+          <p>
+            The command line should remain small. The implementation behind it may be substantial: policy parsing, policy explanation, confinement, process supervision, filesystem mediation, network mediation, tool mediation, secret brokering, approvals, traces, diffs, and replay.
+          </p>
+
+          <h3 id="compression">3.1 Compression target</h3>
+          <p>
+            The software compresses a stack that is normally spread across unrelated tools. The point is not to reimplement every feature of those tools. The point is to give agent execution a single, coherent authority model.
+          </p>
+          <div class="diagram" role="img" aria-label="Compression target diagram">before
+
+  sandbox constructor     policy engine       network proxy       secret broker
+  filesystem overlay  +  approval system  +  MCP gateway     +  audit log
+  seccomp profile        CI wrapper           trace exporter     diff viewer
+
+claim
+
+  policy -> confinement -> execution -> trace
+
+surface
+
+  nobody run --policy policy.toml -- &lt;subject&gt;</div>
+          <p>
+            The useful analogues are small and composable systems: sandbox builders, profile-based confinement tools, Unix filters, policy decision points, and trace readers. The finished program should feel like a Unix tool, not a management console.
+          </p>
+        </section>
+
+        <section id="principles">
+          <h2>4. Design principles</h2>
+          <h3>4.1 No ambient authority</h3>
+          <p>
+            A subject receives no authority simply because the actor has it. Authority is passed through a policy and is scoped to a run.
+          </p>
+
+          <h3>4.2 Capabilities are typed</h3>
+          <p>
+            A grant to read a path is not a grant to write it. A grant to call one MCP tool is not a grant to call another. A grant to use a secret for a GitHub operation is not a grant to place it in the process environment.
+          </p>
+
+          <h3>4.3 Mechanism and decision are separate</h3>
+          <p>
+            Policy evaluation determines what should happen. Enforcement mechanisms determine how it is made true. Some decisions are implemented by the kernel, some by proxies, some by overlays, and some by approval gates.
+          </p>
+
+          <h3>4.4 Denial is a result, not an error</h3>
+          <p>
+            A denied request is normal operation. It should be recorded with the request, the matching rule, and the effect of the denial.
+          </p>
+
+          <h3>4.5 Fail closed</h3>
+          <p>
+            An invalid policy, unsupported primitive, failed proxy, failed secret broker, or unavailable approval path must not widen authority. The run either starts with its declared boundary or does not start.
+          </p>
+
+          <h3>4.6 Local first</h3>
+          <p>
+            The core runtime must work as a local binary. A hosted service may distribute policy and collect trace summaries, but it is not the source of the boundary.
+          </p>
+
+          <h3>4.7 Small trusted core</h3>
+          <p>
+            Code that changes privilege, creates namespaces, applies Landlock, installs seccomp filters, supervises the process tree, or routes secrets belongs to a small trusted core. User interfaces, model integrations, and enterprise workflows do not.
+          </p>
+        </section>
+
+        <section id="model">
+          <h2>5. Model</h2>
+          <p>
+            The design uses a small vocabulary. This is intentional: a boundary that cannot be described simply will not be applied correctly.
+          </p>
+          <table>
+            <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>Actor</td><td>The human, CI job, service account, or organization principal that starts the run.</td></tr>
+              <tr><td>Subject</td><td>The process tree, agent, command, MCP server, or tool being executed.</td></tr>
+              <tr><td>Capability</td><td>A typed grant of authority over a resource or operation.</td></tr>
+              <tr><td>Resource</td><td>A file path, command, network destination, secret, tool, repository, or external system.</td></tr>
+              <tr><td>Request</td><td>An attempted exercise of authority by the subject.</td></tr>
+              <tr><td>Decision</td><td>The policy result for a request: allow, deny, or ask.</td></tr>
+              <tr><td>Run</td><td>A bounded execution with actor, subject, policy, confinement, trace, and result.</td></tr>
+              <tr><td>Trace</td><td>An append-only sequence of events describing decisions and effects.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="authority">5.1 Authority relation</h3>
+          <p>
+            The policy evaluator is a total function over policy, request, and context. Its output includes a reason. The reason is part of the contract because the system must be auditable by inspection.
+          </p>
+          <div class="math">eval : Policy × Request × Context → Decision × Reason</div>
+          <table>
+            <thead><tr><th>Decision</th><th>Runtime interpretation</th></tr></thead>
+            <tbody>
+              <tr><td><span class="label">allow</span></td><td>The request proceeds. The trace records the matched rule and any observed effect.</td></tr>
+              <tr><td><span class="label">deny</span></td><td>The request is blocked. The trace records the attempt, rule, and denial effect.</td></tr>
+              <tr><td><span class="label">ask</span></td><td>The request is suspended until an approval subject grants or denies it.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="run">5.2 Run</h3>
+          <p>
+            The run is the central object. Prompts and chats are not sufficient units because they do not contain authority, confinement, side effects, or evidence.
+          </p>
+          <pre><code>Run {
+  id: RunId,
+  actor: Principal,
+  subject: CommandLine | AgentDescriptor,
+  policy: PolicyDigest,
+  confinement: ConfinementPlan,
+  status: Running | Succeeded | Failed | Denied | Interrupted,
+  trace: TraceRef,
+  result: RunSummary
+}</code></pre>
+
+          <h3>5.3 Capability grammar</h3>
+          <pre><code>Capability ::= FsRead(PathPattern)
+             | FsWrite(PathPattern)
+             | FsDelete(PathPattern)
+             | ProcessExec(CommandPattern)
+             | NetConnect(DestinationPattern)
+             | ToolCall(Server, Tool, ArgumentConstraint)
+             | SecretUse(SecretName, Sink)
+             | Approval(OperationPattern)</code></pre>
+        </section>
+
+        <section id="architecture">
+          <h2>6. Architecture</h2>
+          <p>
+            The architecture separates policy, enforcement, and evidence. These concerns interact, but they should not be fused. Fusing them would make policy harder to explain, enforcement harder to audit, and traces harder to trust.
+          </p>
+          <div class="diagram" role="img" aria-label="Architecture diagram">                 policy file
+                     │
+                     ▼
+              parse / validate
+                     │
+                     ▼
+                 normalize
+                     │
+                     ▼
+             confinement plan
+                     │
+       ┌─────────────┼─────────────┐
+       ▼             ▼             ▼
+ filesystem      process        network
+ boundary        boundary       boundary
+       │             │             │
+       └──────┬──────┴──────┬──────┘
+              ▼             ▼
+           tools/MCP      secrets
+              │             │
+              └──────┬──────┘
+                     ▼
+                   trace
+                     │
+                     ▼
+              diff / replay / audit</div>
+
+          <h3 id="subsystems">6.1 Subsystems</h3>
+          <p>
+            A production repository should be a Rust workspace. The names are less important than dependency direction. The policy crate must not depend on the Linux confinement crate. The trusted core must not depend on the web interface.
+          </p>
+          <div class="subsystem-map">
+            <div><b>nobody-cli</b>Command parsing, preflight, local interaction.</div>
+            <div><b>nobody-policy</b>AST, validation, normalization, decision explanation.</div>
+            <div><b>nobody-runner</b>Run lifecycle, process supervision, cancellation.</div>
+            <div><b>nobody-linux</b>Landlock, namespaces, seccomp, cgroups.</div>
+            <div><b>nobody-fs</b>Path matching, overlays, diffs, file event interpretation.</div>
+            <div><b>nobody-net</b>DNS policy, egress proxy, network event capture.</div>
+            <div><b>nobody-mcp</b>Tool schema inspection, tool policy, protocol proxying.</div>
+            <div><b>nobody-secrets</b>Secret providers, scoped injection, redaction.</div>
+            <div><b>nobody-trace</b>Event schema, append-only writer, readers, exporters.</div>
+          </div>
+
+          <h3 id="trusted-core">6.2 Trusted core</h3>
+          <p>
+            The trusted core is the set of code whose failure can widen authority. It should be dependency-light, testable in isolation, and written so that unsafe operations are scarce and named. Code outside the trusted core may be inconvenient when wrong. Code inside it is dangerous when wrong.
+          </p>
+          <pre><code>trusted core
+  policy normalization
+  confinement plan construction
+  Linux restriction application
+  process spawning and supervision
+  secret routing
+  trace durability for decisions
+
+not trusted core
+  marketing pages
+  hosted dashboard
+  model provider adapters
+  report formatting
+  documentation UI</code></pre>
+        </section>
+
+        <section id="mechanisms">
+          <h2>7. Mechanisms</h2>
+          <p>
+            No single Linux primitive implements the whole model. The runtime must combine mechanisms and be explicit about what each one protects.
+          </p>
+          <table>
+            <thead><tr><th>Boundary</th><th>Mechanisms</th><th>Design note</th></tr></thead>
+            <tbody>
+              <tr><td>Filesystem</td><td>Landlock, mount namespaces, overlays, path policy</td><td>Prefer kernel denial for paths; use overlays to separate proposed writes from committed writes.</td></tr>
+              <tr><td>Process</td><td>User, PID, and mount namespaces; seccomp; cgroups</td><td>Restrict descendants as well as the initial process.</td></tr>
+              <tr><td>Network</td><td>Network namespace, DNS mediation, egress proxy</td><td>Make arbitrary egress impossible under deny-default policy.</td></tr>
+              <tr><td>Tools</td><td>MCP proxy, schema validation, argument constraints</td><td>Treat a tool call as a capability-bearing operation.</td></tr>
+              <tr><td>Secrets</td><td>Brokered retrieval, scoped injection, redaction</td><td>Do not pass the actor's environment wholesale to the subject.</td></tr>
+              <tr><td>Approval</td><td>Suspension point, approver identity, explicit decision</td><td>Pause at irreversible edges rather than relying on post-hoc review.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>7.1 Enforcement classes</h3>
+          <p>
+            Every capability should be assigned an enforcement class. This prevents the policy from promising more than the runtime can provide.
+          </p>
+          <table>
+            <thead><tr><th>Class</th><th>Meaning</th><th>Example</th></tr></thead>
+            <tbody>
+              <tr><td>kernel</td><td>Denied by operating-system primitives.</td><td>Landlock blocks a denied file read.</td></tr>
+              <tr><td>proxy</td><td>Denied by a mandatory user-space mediator.</td><td>MCP proxy denies <code>pull_request.merge</code>.</td></tr>
+              <tr><td>overlay</td><td>Allowed in a reversible write layer.</td><td>Agent writes a proposed patch.</td></tr>
+              <tr><td>approval</td><td>Suspended until an explicit decision.</td><td>Agent requests a production deploy.</td></tr>
+              <tr><td>observed</td><td>Recorded, but not yet enforceable.</td><td>Prototype-only trace of a command.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="policy">
+          <h2>8. Policy</h2>
+          <p>
+            Policy is the source of authority. It must be readable, diffable, and explainable. A policy language that cannot be reviewed in a pull request is too heavy for the first system.
+          </p>
+          <pre><code>name = "coding-agent"
+
+[fs]
+read = ["./", "~/.cargo/registry"]
+write = ["./src", "./tests", "Cargo.toml", "Cargo.lock"]
+deny = [".env", "~/.ssh", "~/.aws", "/var/run/docker.sock"]
+
+[net]
+default = "deny"
+allow = ["github.com", "api.github.com", "crates.io", "api.anthropic.com"]
+
+[shell]
+allow = ["git", "cargo", "rustc", "python"]
+deny = ["ssh", "scp", "curl", "sudo", "rm"]
+
+[mcp.github]
+allow_tools = ["repo.read", "pull_request.create"]
+require_approval = ["pull_request.merge", "workflow.dispatch"]
+
+[secrets]
+default = "deny"
+
+[trace]
+mode = "full"</code></pre>
+          <p>
+            The important interface is not only <code>run</code>. It is <code>explain</code>. A user should be able to ask why a request would be allowed or denied without executing the subject.
+          </p>
+          <pre><code>$ nobody policy simulate policy.toml fs.read ~/.ssh/id_ed25519
+DENY  matched fs.deny "~/.ssh"
+
+$ nobody policy simulate policy.toml net.connect github.com:443
+ALLOW matched net.allow "github.com"</code></pre>
+        </section>
+
+        <section id="trace">
+          <h2>9. Trace</h2>
+          <p>
+            The trace is the evidence layer. It is not merely diagnostic output. It is the object used to inspect a run, justify a decision, reconstruct changes, export audit evidence, and debug the boundary itself.
+          </p>
+          <pre><code>{"kind":"run.start", "run":"run_01J...", "policy":"sha256:..."}
+{"kind":"policy.decision", "request":"fs.read", "path":"~/.ssh/id_ed25519", "decision":"deny", "rule":"fs.deny"}
+{"kind":"net.connect", "host":"github.com", "port":443, "decision":"allow"}
+{"kind":"mcp.tool_call", "server":"github", "tool":"pull_request.create", "decision":"ask"}
+{"kind":"approval.granted", "approval":"appr_01J...", "actor":"njlane314"}
+{"kind":"run.exit", "code":0, "status":"succeeded"}</code></pre>
+          <p>
+            A trace event should record four fields of interest: what was requested, what decision was made, why that decision was made, and what effect followed. If one of these cannot be recorded, the event schema should say so explicitly.
+          </p>
+
+          <h3>9.1 Replay</h3>
+          <p>
+            Replay does not initially mean deterministic re-execution of arbitrary programs. It means reconstruction of the authority history of a run. The minimum useful replay answers: what was allowed, what was denied, what changed, what external calls were made, and who approved irreversible actions.
+          </p>
+        </section>
+
+        <section id="ui">
+          <h2>10. Interface</h2>
+          <p>
+            The primary interface is the command line. The command line is not incidental; it is the natural place for a local execution boundary. It composes with shells, CI, editors, and other tools.
+          </p>
+          <pre><code>$ nobody run --policy policy.toml -- claude-code</code></pre>
+          <p>
+            The preflight output should make authority visible before execution. The post-run output should summarize evidence after execution. The UI should be sparse: no decorative status, no anthropomorphic agent state, no vague risk meter without rule-level explanation.
+          </p>
+          <pre><code>filesystem
+  read   ./, ~/.cargo/registry
+  write  ./src, ./tests, Cargo.toml
+  deny   .env, ~/.ssh, ~/.aws, /var/run/docker.sock
+
+network
+  allow  github.com, api.github.com, crates.io
+  deny   *
+
+shell
+  allow  git, cargo, rustc, python
+  deny   ssh, scp, curl, sudo, rm</code></pre>
+          <p>
+            A web interface may be useful for organizations, but it should not become the conceptual center. The center is the run and its trace.
+          </p>
+        </section>
+
+        <section id="threat-model">
+          <h2>11. Threat model</h2>
+          <p>
+            The design should be honest about the adversary. <code>nobody</code> is not a proof that an arbitrary host is safe. It is a boundary that reduces the authority of a subject under a stated policy.
+          </p>
+          <div class="grid-2">
+            <div class="card">
+              <h3>In scope</h3>
+              <ul>
+                <li>Agent attempts to read denied files.</li>
+                <li>Agent attempts arbitrary network egress.</li>
+                <li>Agent runs a denied command.</li>
+                <li>Agent calls an unauthorized MCP tool.</li>
+                <li>Agent requests a secret for an unapproved sink.</li>
+                <li>Agent proposes an irreversible external action.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Out of scope initially</h3>
+              <ul>
+                <li>Compromised host kernel.</li>
+                <li>Malicious root administrator.</li>
+                <li>Hardware side channels.</li>
+                <li>Perfect data-flow tracking through arbitrary process memory.</li>
+                <li>Full deterministic replay of all programs.</li>
+                <li>All browser GUI semantics.</li>
+              </ul>
+            </div>
+          </div>
+          <p>
+            The practical test is whether an organization can allow useful agent work while denying common accidental and intentional overreach. The test is not whether the runtime solves every confinement problem in computer security.
+          </p>
+        </section>
+
+        <section id="enterprise">
+          <h2>12. Enterprise form</h2>
+          <p>
+            The enterprise system is not a different product. It is coordination around the same local primitive. The local runtime enforces. The control plane distributes policy, stores approvals, summarizes traces, integrates identity, and exports evidence.
+          </p>
+          <div class="diagram" role="img" aria-label="Enterprise architecture diagram">developer laptop          CI runner              hosted runner
+      │                     │                       │
+      ▼                     ▼                       ▼
+local nobody runtime   local nobody runtime    managed runtime
+      │                     │                       │
+      └──────── signed trace summaries ────────────┘
+                            │
+                            ▼
+                  enterprise control plane
+                            │
+       ┌────────────────────┼────────────────────┐
+       ▼                    ▼                    ▼
+ central policy         approvals            audit search
+ identity / RBAC        secret routing        SIEM export</div>
+          <p>
+            The enterprise value is permission to adopt agents without granting them the company. The buyer is not purchasing intelligence. The buyer is purchasing a bounded execution model and evidence that the boundary was applied.
+          </p>
+        </section>
+
+        <section id="non-goals">
+          <h2>13. Non-goals</h2>
+          <ul>
+            <li><strong>Not an agent framework.</strong> The system does not decide how agents plan, prompt, or choose models.</li>
+            <li><strong>Not a model provider.</strong> The boundary should be independent of model vendor.</li>
+            <li><strong>Not a container platform.</strong> It may use container mechanisms, but image distribution and orchestration are not the product.</li>
+            <li><strong>Not an observability dashboard.</strong> Observation after damage is insufficient.</li>
+            <li><strong>Not a claim of perfect security.</strong> The claim is explicit authority reduction under stated assumptions.</li>
+          </ul>
+        </section>
+
+        <section id="roadmap">
+          <h2>14. Roadmap</h2>
+          <p>
+            The implementation should move from semantics to enforcement. A weak but clear boundary can be strengthened. A vague boundary cannot be audited.
+          </p>
+          <table>
+            <thead><tr><th>Phase</th><th>Milestone</th><th>Exit criterion</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td>Prototype surface</td><td>Policy parser, command gate, runner, JSONL trace.</td></tr>
+              <tr><td>1</td><td>Trace schema</td><td>Versioned event types, stable run IDs, append-only writer.</td></tr>
+              <tr><td>2</td><td>Policy explanation</td><td><code>explain</code> and <code>simulate</code> produce rule-level reasons.</td></tr>
+              <tr><td>3</td><td>Filesystem boundary</td><td>Denied paths are blocked under Linux tests.</td></tr>
+              <tr><td>4</td><td>Process boundary</td><td>Descendants inherit restrictions; resource limits are enforced.</td></tr>
+              <tr><td>5</td><td>Network boundary</td><td>Deny-default egress and destination traces.</td></tr>
+              <tr><td>6</td><td>MCP boundary</td><td>Tool calls are allowed, denied, or suspended for approval.</td></tr>
+              <tr><td>7</td><td>Secret boundary</td><td>Secrets flow only into approved sinks.</td></tr>
+              <tr><td>8</td><td>Replay and diff</td><td>A run can be inspected without rerunning the subject.</td></tr>
+              <tr><td>9</td><td>Organization layer</td><td>Central policy, identity, approvals, trace search, export.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="references">
+          <h2>References</h2>
+          <ol>
+            <li><a href="https://github.com/njlane314/nobody">nobody repository</a>. Current seed implementation and README.</li>
+            <li><a href="https://www.usenix.org/legacy/event/usenix2000/general/full_papers/spinellis/spinellis.pdf">Diomidis Spinellis, “Outwit: Unix Tool-based Programming Meets the Windows World.”</a> Useful precedent for small tools, composition, and design rationale.</li>
+            <li><a href="https://softengbook.org/chapter5">Software Engineering: A Modern Approach, Chapter 5.</a> Background on decomposition, abstraction, conceptual integrity, cohesion, and coupling.</li>
+            <li><a href="https://docs.kernel.org/userspace-api/landlock.html">Linux Landlock documentation.</a> Kernel support for restricting ambient process rights.</li>
+            <li><a href="https://docs.kernel.org/userspace-api/seccomp_filter.html">Linux seccomp filter documentation.</a> System-call filtering for process confinement.</li>
+            <li><a href="https://modelcontextprotocol.io/specification/2025-11-25">Model Context Protocol specification.</a> Contemporary tool boundary for AI systems.</li>
+            <li><a href="https://github.com/containers/bubblewrap">bubblewrap</a> and <a href="https://github.com/netblue30/firejail">Firejail</a>. Existing sandboxing references.</li>
+          </ol>
+        </section>
+
+        <footer>
+          This note describes the intended architecture of <code>nobody</code>. It is intentionally plain: the interface should not obscure the boundary it describes.
+        </footer>
+      </article>
+    </main>
+  </div>
+</body>
+</html>
