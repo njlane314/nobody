@@ -2,7 +2,7 @@
 
 Run agents without ambient authority.
 
-[![Build](https://github.com/njlane314/nobody/actions/workflows/ci.yml/badge.svg)](https://github.com/njlane314/nobody/actions/workflows/ci.yml)
+[![build](https://github.com/njlane314/nobody/actions/workflows/ci.yml/badge.svg)](https://github.com/njlane314/nobody/actions/workflows/ci.yml)
 [![status](https://img.shields.io/badge/status-prototype-orange)](docs/roadmap.md)
 
 nobody is a least-privilege execution runtime for AI agents.
