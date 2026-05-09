@@ -1,6 +1,45 @@
 # nobody
 
-Run programs with explicit capabilities.
+Run agents without ambient authority.
+
+nobody is a least-privilege runtime for autonomous software. It runs agents,
+tools, MCP servers, and shell commands inside explicit capability boundaries:
+filesystem, network, process, secrets, and tool access are granted by policy,
+enforced at runtime, and recorded as a replayable trace.
+
+Agents should run as nobody.
+
+## Future CLI
+
+```sh
+nobody run --profile coding-agent -- claude-code
+nobody trace show latest
+nobody diff latest
+nobody mcp proxy --policy nobody.toml github
+```
+
+```text
+agent / coding tool / MCP client
+        |
+        v
+     nobody
+        |
+        +--> filesystem capabilities
+        +--> network capabilities
+        +--> shell/process capabilities
+        +--> MCP/tool capabilities
+        +--> secrets capabilities
+        +--> approval gates
+        +--> append-only trace
+        |
+        v
+   actual OS / APIs / repos / SaaS tools
+```
+
+This repo is currently a prototype. The company version is a serious systems
+product: a Unix-style execution primitive for the agent era.
+
+## Current prototype
 
 `nobody` currently provides the first product surface only: it reads
 `nobody.toml`, parses a simple capability policy, gates shell commands by an
