@@ -1,0 +1,15 @@
+[fs]
+read = ["./"]
+write = ["./src", "./tests"]
+deny = [".env", "~/.ssh", "~/.aws"]
+
+[net]
+allow = ["github.com", "api.anthropic.com"]
+deny = ["*"]
+
+[shell]
+allow = ["echo", "git", "cargo", "rustc"]
+deny = ["rm", "curl", "scp", "ssh"]
+
+[trace]
+path = ".nobody/runs/latest.jsonl"
