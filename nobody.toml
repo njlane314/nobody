@@ -12,6 +12,14 @@ deny = []
 allow = ["echo", "git", "cargo", "rustc"]
 deny = ["rm", "curl", "scp", "ssh"]
 
+[[process.rule]]
+program = "cargo"
+allow_args = ["test", "check", "build"]
+
+[[process.rule]]
+program = "git"
+allow_args = ["status", "diff", "log", "show", "add", "commit"]
+
 [env]
 clear = true
 allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL"]

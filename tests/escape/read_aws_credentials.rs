@@ -11,7 +11,17 @@ fn read_aws_credentials_is_denied() {
         home.join(".aws/credentials"),
         "[default]\naws_secret_access_key=secret\n",
     );
-    dir.write_policy(&[], &[], &["~/.aws"], &["sh"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &[],
+        &["~/.aws"],
+        &["sh"],
+        r#"
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody_with_home(
         dir.path(),

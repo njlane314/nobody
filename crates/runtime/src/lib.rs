@@ -87,8 +87,17 @@ impl Runtime {
             }),
         )?;
 
-        if let Decision::Deny { reason } = process_decision {
-            bail!("process denied by policy: {}", reason.message);
+        match process_decision {
+            Decision::Allow { .. } => {}
+            Decision::Deny { reason } => {
+                bail!("process denied by policy: {}", reason.message);
+            }
+            Decision::Ask { request } => {
+                bail!(
+                    "process requires approval but approval gates are not implemented: {}",
+                    request.reason.message
+                );
+            }
         }
 
         let env = self.prepare_env();

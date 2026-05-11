@@ -38,9 +38,15 @@ Simulate policy decisions without running anything.
 
 ```sh
 cargo run -- policy simulate nobody.toml -- process.exec curl
+cargo run -- policy simulate nobody.toml -- process.exec cargo test --workspace
+cargo run -- policy simulate nobody.toml -- process.exec python -c 'print(1)'
 cargo run -- policy simulate nobody.toml -- env.read GITHUB_TOKEN
 cargo run -- policy simulate nobody.toml -- fs.read .env
 ```
+
+Argument-aware process rules allow conservative forms such as `cargo test` and
+deny risky interpreter forms such as `python -c` unless a policy explicitly
+allows that argv prefix.
 
 Filesystem simulation is diagnostic only in this prototype. It explains the
 policy decision. `nobody run` installs a Landlock filesystem boundary on Linux

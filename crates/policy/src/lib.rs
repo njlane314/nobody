@@ -54,6 +54,27 @@ pub struct NetPolicy {
 pub struct ProcessPolicy {
     pub allow: Vec<String>,
     pub deny: Vec<String>,
+    pub rule: Vec<ProcessRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessRule {
+    pub program: String,
+    #[serde(default)]
+    pub allow_args: Vec<String>,
+    #[serde(default)]
+    pub deny_args: Vec<String>,
+    #[serde(default)]
+    pub decision: Option<ProcessRuleDecision>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessRuleDecision {
+    Allow,
+    Deny,
+    Ask,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -177,7 +198,7 @@ impl<'a> PolicyEvaluator<'a> {
         let basename = program.rsplit('/').next().unwrap_or(&program);
         let resource = Resource::Process {
             program: program.clone(),
-            argv,
+            argv: argv.clone(),
         };
 
         if let Some(pattern) = self
@@ -185,7 +206,7 @@ impl<'a> PolicyEvaluator<'a> {
             .process
             .deny
             .iter()
-            .find(|cmd| cmd.as_str() == program || cmd.as_str() == basename)
+            .find(|cmd| process_name_matches(cmd, &program, basename))
         {
             return Decision::deny(DecisionReason {
                 rule_id: Some("process.deny".into()),
@@ -193,6 +214,83 @@ impl<'a> PolicyEvaluator<'a> {
                 action: ActionKind::ProcessExec,
                 matched_pattern: Some(pattern.clone()),
                 message: "process is explicitly denied".into(),
+            });
+        }
+
+        let matching_rules: Vec<_> = self
+            .policy
+            .process
+            .rule
+            .iter()
+            .filter(|rule| process_name_matches(&rule.program, &program, basename))
+            .collect();
+
+        if let Some((rule, pattern)) = matching_rules
+            .iter()
+            .filter_map(|rule| args_match(&rule.deny_args, &argv).map(|pattern| (*rule, pattern)))
+            .next()
+        {
+            return Decision::deny(DecisionReason {
+                rule_id: Some("process.rule.deny_args".into()),
+                resource,
+                action: ActionKind::ProcessExec,
+                matched_pattern: Some(pattern),
+                message: format!("process arguments matched deny rule for {}", rule.program),
+            });
+        }
+
+        if let Some((rule, pattern)) = matching_rules
+            .iter()
+            .filter_map(|rule| args_match(&rule.allow_args, &argv).map(|pattern| (*rule, pattern)))
+            .next()
+        {
+            let reason = DecisionReason {
+                rule_id: Some("process.rule.allow_args".into()),
+                resource,
+                action: ActionKind::ProcessExec,
+                matched_pattern: Some(pattern),
+                message: format!("process arguments matched allow rule for {}", rule.program),
+            };
+            return process_rule_decision(
+                rule.decision.unwrap_or(ProcessRuleDecision::Allow),
+                reason,
+            );
+        }
+
+        if let Some(rule) = matching_rules
+            .iter()
+            .find(|rule| !rule.allow_args.is_empty())
+        {
+            return Decision::deny(DecisionReason {
+                rule_id: Some("process.rule.allow_args".into()),
+                resource,
+                action: ActionKind::ProcessExec,
+                matched_pattern: Some(display_arg_rule(&rule.allow_args)),
+                message: format!(
+                    "process arguments did not match allow rule for {}",
+                    rule.program
+                ),
+            });
+        }
+
+        if let Some(rule) = matching_rules.iter().find(|rule| rule.decision.is_some()) {
+            let reason = DecisionReason {
+                rule_id: Some("process.rule".into()),
+                resource,
+                action: ActionKind::ProcessExec,
+                matched_pattern: Some(rule.program.clone()),
+                message: format!("process matched rule for {}", rule.program),
+            };
+            return process_rule_decision(rule.decision.unwrap(), reason);
+        }
+
+        if let Some(pattern) = risky_process_pattern(basename, &argv) {
+            return Decision::deny(DecisionReason {
+                rule_id: Some("process.risky".into()),
+                resource,
+                action: ActionKind::ProcessExec,
+                matched_pattern: Some(pattern.into()),
+                message: "process arguments are risky without an explicit process.rule".into(),
             });
         }
 
@@ -211,7 +309,7 @@ impl<'a> PolicyEvaluator<'a> {
             .process
             .allow
             .iter()
-            .find(|cmd| cmd.as_str() == program || cmd.as_str() == basename)
+            .find(|cmd| process_name_matches(cmd, &program, basename))
         {
             return Decision::allow(DecisionReason {
                 rule_id: Some("process.allow".into()),
@@ -586,6 +684,90 @@ fn pattern_matches(pattern: &str, value: &str) -> bool {
     tail.is_empty() || remainder.ends_with(tail)
 }
 
+fn process_name_matches(pattern: &str, program: &str, basename: &str) -> bool {
+    pattern == program || pattern == basename
+}
+
+fn process_rule_decision(decision: ProcessRuleDecision, reason: DecisionReason) -> Decision {
+    match decision {
+        ProcessRuleDecision::Allow => Decision::allow(reason),
+        ProcessRuleDecision::Deny => Decision::deny(reason),
+        ProcessRuleDecision::Ask => Decision::ask(reason),
+    }
+}
+
+fn args_match(patterns: &[String], argv: &[String]) -> Option<String> {
+    if patterns.is_empty() {
+        return None;
+    }
+
+    if arg_rule_is_prefix(patterns) {
+        if argv_has_prefix(argv, patterns) {
+            Some(display_arg_rule(patterns))
+        } else {
+            None
+        }
+    } else {
+        let first = argv.first()?;
+        patterns
+            .iter()
+            .find(|pattern| pattern.as_str() == first)
+            .cloned()
+    }
+}
+
+fn arg_rule_is_prefix(patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| pattern.starts_with('-'))
+}
+
+fn argv_has_prefix(argv: &[String], prefix: &[String]) -> bool {
+    argv.len() >= prefix.len()
+        && argv
+            .iter()
+            .zip(prefix.iter())
+            .all(|(arg, expected)| arg == expected)
+}
+
+fn display_arg_rule(patterns: &[String]) -> String {
+    patterns.join(" ")
+}
+
+fn risky_process_pattern(basename: &str, argv: &[String]) -> Option<&'static str> {
+    let first = argv.first().map(String::as_str);
+
+    if basename.starts_with("python") && first == Some("-c") {
+        return Some("python -c");
+    }
+
+    if basename == "sh" && first == Some("-c") {
+        return Some("sh -c");
+    }
+
+    if basename == "bash" && first == Some("-c") {
+        return Some("bash -c");
+    }
+
+    if basename == "bash" && first == Some("-lc") {
+        return Some("bash -lc");
+    }
+
+    if basename == "git"
+        && argv.first().is_some_and(|arg| arg == "config")
+        && argv.iter().skip(1).any(|arg| arg == "--global")
+    {
+        return Some("git config --global");
+    }
+
+    if basename == "git"
+        && argv.first().is_some_and(|arg| arg == "config")
+        && argv.iter().skip(1).any(|arg| arg == "--system")
+    {
+        return Some("git config --system");
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,6 +795,14 @@ mod tests {
             [process]
             allow = ["echo", "git", "cargo", "rustc"]
             deny = ["rm", "curl", "scp", "ssh"]
+
+            [[process.rule]]
+            program = "cargo"
+            allow_args = ["test", "check", "build"]
+
+            [[process.rule]]
+            program = "python"
+            allow_args = ["-m", "pytest"]
 
             [env]
             clear = true
@@ -642,6 +832,14 @@ mod tests {
         assert_eq!(policy.net.deny, Vec::<String>::new());
         assert_eq!(policy.process.allow, vec!["echo", "git", "cargo", "rustc"]);
         assert_eq!(policy.process.deny, vec!["rm", "curl", "scp", "ssh"]);
+        assert_eq!(policy.process.rule.len(), 2);
+        assert_eq!(policy.process.rule[0].program, "cargo");
+        assert_eq!(
+            policy.process.rule[0].allow_args,
+            vec!["test", "check", "build"]
+        );
+        assert_eq!(policy.process.rule[1].program, "python");
+        assert_eq!(policy.process.rule[1].allow_args, vec!["-m", "pytest"]);
         assert_eq!(policy.env.allow, vec!["PATH", "HOME", "USER"]);
         assert_eq!(policy.approval.require, vec!["process.unlisted"]);
         assert_eq!(
@@ -656,6 +854,7 @@ mod tests {
             process: ProcessPolicy {
                 allow: vec!["echo".into()],
                 deny: vec!["rm".into()],
+                rule: Vec::new(),
             },
             ..Default::default()
         };
@@ -674,6 +873,7 @@ mod tests {
             process: ProcessPolicy {
                 allow: vec!["echo".into()],
                 deny: vec![],
+                rule: Vec::new(),
             },
             ..Default::default()
         };
@@ -692,6 +892,7 @@ mod tests {
             process: ProcessPolicy {
                 allow: vec!["echo".into()],
                 deny: vec![],
+                rule: Vec::new(),
             },
             ..Default::default()
         };
@@ -710,6 +911,7 @@ mod tests {
             process: ProcessPolicy {
                 allow: vec!["git".into()],
                 deny: vec![],
+                rule: Vec::new(),
             },
             ..Default::default()
         };
@@ -720,6 +922,141 @@ mod tests {
         });
 
         assert!(decision.is_allow());
+    }
+
+    #[test]
+    fn allows_process_rule_first_argument_alternatives() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                rule: vec![ProcessRule {
+                    program: "cargo".into(),
+                    allow_args: vec!["test".into(), "check".into(), "build".into()],
+                    deny_args: Vec::new(),
+                    decision: None,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let test = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "cargo".into(),
+            argv: vec!["test".into(), "--workspace".into()],
+        });
+        let publish = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "cargo".into(),
+            argv: vec!["publish".into()],
+        });
+
+        assert!(test.is_allow());
+        assert!(matches!(publish, Decision::Deny { .. }));
+        assert_eq!(
+            publish.reason().rule_id.as_deref(),
+            Some("process.rule.allow_args")
+        );
+    }
+
+    #[test]
+    fn allows_process_rule_argument_prefixes() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                rule: vec![ProcessRule {
+                    program: "python".into(),
+                    allow_args: vec!["-m".into(), "pytest".into()],
+                    deny_args: Vec::new(),
+                    decision: None,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let pytest = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "python".into(),
+            argv: vec!["-m".into(), "pytest".into(), "tests".into()],
+        });
+        let command = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "python".into(),
+            argv: vec!["-c".into(), "print(1)".into()],
+        });
+
+        assert!(pytest.is_allow());
+        assert!(matches!(command, Decision::Deny { .. }));
+    }
+
+    #[test]
+    fn denies_risky_interpreter_args_despite_legacy_allow() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                allow: vec!["python".into(), "sh".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let python = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "python".into(),
+            argv: vec!["-c".into(), "print(1)".into()],
+        });
+        let shell = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "sh".into(),
+            argv: vec!["-c".into(), "echo ok".into()],
+        });
+
+        assert!(matches!(python, Decision::Deny { .. }));
+        assert!(matches!(shell, Decision::Deny { .. }));
+        assert_eq!(python.reason().rule_id.as_deref(), Some("process.risky"));
+    }
+
+    #[test]
+    fn explicit_arg_rule_can_allow_risky_interpreter_args() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                rule: vec![ProcessRule {
+                    program: "python".into(),
+                    allow_args: vec!["-c".into(), "print(1)".into()],
+                    deny_args: Vec::new(),
+                    decision: None,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let decision = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "python".into(),
+            argv: vec!["-c".into(), "print(1)".into()],
+        });
+
+        assert!(decision.is_allow());
+        assert_eq!(
+            decision.reason().rule_id.as_deref(),
+            Some("process.rule.allow_args")
+        );
+    }
+
+    #[test]
+    fn denies_dangerous_git_config_global_despite_legacy_allow() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                allow: vec!["git".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let decision = policy.evaluator().evaluate(Action::ExecuteProcess {
+            program: "git".into(),
+            argv: vec![
+                "config".into(),
+                "--global".into(),
+                "credential.helper".into(),
+                "store".into(),
+            ],
+        });
+
+        assert!(matches!(decision, Decision::Deny { .. }));
+        assert_eq!(decision.reason().rule_id.as_deref(), Some("process.risky"));
     }
 
     #[test]

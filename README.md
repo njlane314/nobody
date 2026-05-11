@@ -57,7 +57,7 @@ variables, and appends structured JSONL trace events.
 
 Currently enforced:
 
-- process allow/deny before a command is spawned
+- process allow/deny and argument-aware process rules before a command is spawned
 - environment filtering by allow/deny patterns
 - Linux filesystem read/write boundaries through Landlock when the policy can
   be represented without deny carve-outs under granted paths

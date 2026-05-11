@@ -11,7 +11,17 @@ fn bash_child_read_is_denied() {
 
     let dir = EscapeDir::new("bash-child-read");
     write(dir.path().join(".env"), "SECRET=1\n");
-    dir.write_policy(&[], &[], &[".env"], &["bash"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &[],
+        &[".env"],
+        &["bash"],
+        r#"
+[[process.rule]]
+program = "bash"
+allow_args = ["-lc"]
+"#,
+    );
 
     let output = run_nobody(
         dir.path(),

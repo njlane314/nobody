@@ -107,6 +107,9 @@ Process execution policy.
 Array of allowed program names.
 .It Va deny
 Array of denied program names.
+.It Va rule
+Array of argument-aware process rule tables, written as
+.Va [[process.rule]] .
 .El
 .Pp
 .Va process.deny
@@ -121,6 +124,50 @@ matches both
 .Qq git
 and
 .Pa /usr/bin/git .
+.Pp
+A
+.Va [[process.rule]]
+table has a required
+.Va program
+field and optional
+.Va allow_args ,
+.Va deny_args ,
+and
+.Va decision
+fields.
+.Va allow_args
+and
+.Va deny_args
+are arrays of strings.
+If any value starts with
+.Ql - ,
+the array is treated as an argv prefix.
+Otherwise the array is treated as allowed or denied first arguments.
+.Pp
+.Va deny_args
+wins over
+.Va allow_args .
+A rule with
+.Va allow_args
+constrains that program; non-matching argv is denied.
+The optional
+.Va decision
+field may be
+.Qq allow ,
+.Qq deny ,
+or
+.Qq ask .
+Ask decisions fail closed until approval gates are implemented.
+.Pp
+Risky interpreter and credential-changing forms are denied unless an explicit
+argument rule allows them.
+This includes
+.Qq python -c ,
+.Qq sh -c ,
+.Qq bash -c ,
+.Qq bash -lc ,
+and
+.Qq git config --global .
 .Ss env
 Environment inheritance policy.
 .Bl -tag -width "clear" -compact
@@ -194,6 +241,18 @@ deny = []
 [process]
 allow = ["echo", "git", "cargo", "rustc"]
 deny = ["rm", "curl", "scp", "ssh"]
+
+[[process.rule]]
+program = "cargo"
+allow_args = ["test", "check", "build"]
+
+[[process.rule]]
+program = "python"
+allow_args = ["-m", "pytest"]
+
+[[process.rule]]
+program = "git"
+allow_args = ["status", "diff", "log", "show", "add", "commit"]
 
 [env]
 clear = true

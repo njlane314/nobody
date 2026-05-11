@@ -11,7 +11,17 @@ fn python_child_read_is_denied() {
 
     let dir = EscapeDir::new("python-child-read");
     write(dir.path().join(".env"), "SECRET=1\n");
-    dir.write_policy(&[], &[], &[".env"], &["python3"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &[],
+        &[".env"],
+        &["python3"],
+        r#"
+[[process.rule]]
+program = "python3"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody(
         dir.path(),

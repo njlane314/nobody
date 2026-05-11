@@ -40,6 +40,21 @@ The runtime checks
 and
 .Va process.allow
 before spawning the command.
+.Va [[process.rule]]
+adds argument-aware rules for conservative argv forms such as
+.Qq cargo test ,
+.Qq cargo check ,
+.Qq python -m pytest ,
+and
+.Qq git status .
+.Pp
+Risky forms such as
+.Qq python -c ,
+.Qq sh -c ,
+.Qq bash -lc ,
+and
+.Qq git config --global
+are denied unless an explicit argument rule allows them.
 .Pp
 This is not yet a full process-tree execution monitor.
 Use filesystem sandboxing and narrow command allow lists together.
@@ -89,7 +104,8 @@ summary, sandbox backend status, and exit status.
 The current runtime enforces:
 .Bl -bullet -compact
 .It
-the requested process decision before spawn;
+the requested process decision, including argument-aware process rules, before
+spawn;
 .It
 environment filtering before spawn;
 .It

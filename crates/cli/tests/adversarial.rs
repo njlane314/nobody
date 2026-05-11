@@ -42,6 +42,10 @@ deny = []
 allow = ["echo", "sh"]
 deny = ["curl"]
 
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+
 [env]
 clear = true
 allow = ["PATH", "HOME", "USER"]
@@ -50,6 +54,49 @@ deny = ["*TOKEN*", "*KEY*", "AWS_*", "SSH_AUTH_SOCK"]
 [trace]
 path = ".nobody/runs/latest.jsonl"
 redact = ["*TOKEN*", "*KEY*", "Authorization"]
+"#,
+        )
+        .unwrap();
+    }
+
+    fn write_process_rule_policy(&self) {
+        fs::write(
+            self.path.join("nobody.toml"),
+            r#"
+[fs]
+read = []
+write = []
+deny = []
+
+[net]
+mode = "deny-by-default"
+allow = []
+deny = []
+
+[process]
+allow = []
+deny = []
+
+[[process.rule]]
+program = "cargo"
+allow_args = ["test", "check", "build"]
+
+[[process.rule]]
+program = "python"
+allow_args = ["-m", "pytest"]
+
+[[process.rule]]
+program = "git"
+allow_args = ["status", "diff", "log", "show", "add", "commit"]
+
+[env]
+clear = true
+allow = ["PATH", "HOME", "USER"]
+deny = ["*TOKEN*", "*KEY*"]
+
+[trace]
+path = ".nobody/runs/latest.jsonl"
+redact = ["*TOKEN*", "*KEY*"]
 "#,
         )
         .unwrap();
@@ -272,6 +319,99 @@ fn policy_simulate_examples_return_expected_decisions() {
     );
     assert!(fs.status.success(), "{}", stderr(&fs));
     assert!(stdout(&fs).contains("DENY fs.read .env"));
+}
+
+#[test]
+fn policy_simulate_process_rules_return_expected_decisions() {
+    let dir = TestDir::new("simulate-process-rules");
+    dir.write_process_rule_policy();
+
+    let cargo_test = run_in(
+        dir.path(),
+        &[
+            "policy",
+            "simulate",
+            "nobody.toml",
+            "--",
+            "process.exec",
+            "cargo",
+            "test",
+            "--workspace",
+        ],
+    );
+    assert!(cargo_test.status.success(), "{}", stderr(&cargo_test));
+    assert!(stdout(&cargo_test).contains("ALLOW process.exec cargo test --workspace"));
+    assert!(stdout(&cargo_test).contains("rule: process.rule.allow_args"));
+
+    let cargo_publish = run_in(
+        dir.path(),
+        &[
+            "policy",
+            "simulate",
+            "nobody.toml",
+            "--",
+            "process.exec",
+            "cargo",
+            "publish",
+        ],
+    );
+    assert!(cargo_publish.status.success(), "{}", stderr(&cargo_publish));
+    assert!(stdout(&cargo_publish).contains("DENY process.exec cargo publish"));
+
+    let python_pytest = run_in(
+        dir.path(),
+        &[
+            "policy",
+            "simulate",
+            "nobody.toml",
+            "--",
+            "process.exec",
+            "python",
+            "-m",
+            "pytest",
+            "tests",
+        ],
+    );
+    assert!(python_pytest.status.success(), "{}", stderr(&python_pytest));
+    assert!(stdout(&python_pytest).contains("ALLOW process.exec python -m pytest tests"));
+
+    let python_command = run_in(
+        dir.path(),
+        &[
+            "policy",
+            "simulate",
+            "nobody.toml",
+            "--",
+            "process.exec",
+            "python",
+            "-c",
+            "print(1)",
+        ],
+    );
+    assert!(
+        python_command.status.success(),
+        "{}",
+        stderr(&python_command)
+    );
+    assert!(stdout(&python_command).contains("DENY process.exec python -c print(1)"));
+
+    let git_global = run_in(
+        dir.path(),
+        &[
+            "policy",
+            "simulate",
+            "nobody.toml",
+            "--",
+            "process.exec",
+            "git",
+            "config",
+            "--global",
+            "user.name",
+            "nobody",
+        ],
+    );
+    assert!(git_global.status.success(), "{}", stderr(&git_global));
+    assert!(stdout(&git_global).contains("DENY process.exec git config --global user.name nobody"));
 }
 
 #[test]

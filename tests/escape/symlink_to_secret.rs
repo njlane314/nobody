@@ -12,7 +12,17 @@ fn symlink_to_secret_is_denied() {
         dir.path().join("work/symlink-to-env"),
     )
     .unwrap();
-    dir.write_policy(&["./work"], &[], &[".env"], &["sh"]);
+    dir.write_policy_with_process_rules(
+        &["./work"],
+        &[],
+        &[".env"],
+        &["sh"],
+        r#"
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody(
         dir.path(),

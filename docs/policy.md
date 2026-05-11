@@ -33,6 +33,18 @@ deny = []
 allow = ["echo", "git", "cargo", "rustc"]
 deny = ["rm", "curl", "scp", "ssh"]
 
+[[process.rule]]
+program = "cargo"
+allow_args = ["test", "check", "build"]
+
+[[process.rule]]
+program = "python"
+allow_args = ["-m", "pytest"]
+
+[[process.rule]]
+program = "git"
+allow_args = ["status", "diff", "log", "show", "add", "commit"]
+
 [env]
 clear = true
 allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL"]
@@ -74,6 +86,35 @@ list and must not appear in `process.deny`.
 
 Commands match either the exact program string or its basename. For example,
 `git` matches both `git` and `/usr/bin/git`.
+
+`[[process.rule]]` adds argument-aware rules for a program. A rule with
+`allow_args` constrains matching programs to conservative argv forms. If the
+first `allow_args` value starts with `-`, the whole array is treated as an argv
+prefix, so `["-m", "pytest"]` allows `python -m pytest ...`. Otherwise the
+array is treated as allowed first arguments, so `["test", "check", "build"]`
+allows `cargo test`, `cargo check`, and `cargo build`.
+
+`deny_args` uses the same matching rules and wins over `allow_args`. A rule may
+also set `decision = "deny"` or `decision = "ask"`, although ask decisions fail
+closed until approval gates are implemented.
+
+Risky interpreter and credential-changing forms are denied unless an explicit
+argument rule allows them. Today that includes `python -c`, `sh -c`,
+`bash -c`, `bash -lc`, and `git config --global` or `git config --system`.
+
+```toml
+[[process.rule]]
+program = "cargo"
+allow_args = ["test", "check", "build"]
+
+[[process.rule]]
+program = "python"
+allow_args = ["-m", "pytest"]
+
+[[process.rule]]
+program = "git"
+allow_args = ["status", "diff", "log", "show", "add", "commit"]
+```
 
 ## Filesystem
 

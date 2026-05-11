@@ -8,7 +8,17 @@ fn read_ssh_key_is_denied() {
     let home = dir.path().join("home");
     mkdir(home.join(".ssh"));
     write(home.join(".ssh/id_rsa"), "private-key\n");
-    dir.write_policy(&[], &[], &["~/.ssh"], &["sh"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &[],
+        &["~/.ssh"],
+        &["sh"],
+        r#"
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody_with_home(
         dir.path(),

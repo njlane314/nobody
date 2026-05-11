@@ -6,7 +6,17 @@ use super::common::*;
 fn write_outside_repo_is_denied() {
     let dir = EscapeDir::new("write-outside-repo");
     mkdir(dir.path().join("work"));
-    dir.write_policy(&[], &["./work"], &[], &["sh"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &["./work"],
+        &[],
+        &["sh"],
+        r#"
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody(
         dir.path(),

@@ -62,14 +62,14 @@ nobody runner register
 
 1. Validate the Linux Landlock backend in CI and document the ABI v3 kernel requirement.
 2. Make `tests/escape/` the first-class guarantee suite for interpreter and build-system escapes.
-3. Add conservative process-rule models before broadening process policy.
-4. Polish trace explanation and policy diagnostics.
-5. Add network namespace/proxy enforcement only after filesystem escape tests are stable.
+3. Polish trace explanation and policy diagnostics.
+4. Add network namespace/proxy enforcement only after filesystem escape tests are stable.
+5. Add profile-based `nobody init` defaults for Rust, Node, Python, readonly review, and CI agents.
 
 ## Current guarantees
 
-`nobody` currently enforces process allow/deny checks before spawning a command
-and filters environment variables before the child process starts. On Linux, it
+`nobody` currently enforces process allow/deny checks, argument-aware process
+rules, and environment filtering before the child process starts. On Linux, it
 also installs a Landlock filesystem boundary for policies that can be expressed
 as granted read/write paths.
 

@@ -6,7 +6,17 @@ use super::common::*;
 fn read_dotenv_is_denied() {
     let dir = EscapeDir::new("read-dotenv");
     write(dir.path().join(".env"), "SECRET=1\n");
-    dir.write_policy(&[], &[], &[".env"], &["sh"]);
+    dir.write_policy_with_process_rules(
+        &[],
+        &[],
+        &[".env"],
+        &["sh"],
+        r#"
+[[process.rule]]
+program = "sh"
+allow_args = ["-c"]
+"#,
+    );
 
     let output = run_nobody(
         dir.path(),
