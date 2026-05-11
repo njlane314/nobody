@@ -45,6 +45,8 @@ or
 without a matching
 .Va [[process.rule]] ,
 and Linux Landlock deny carve-outs underneath granted filesystem trees.
+Those carve-outs are enforceable by the macOS Seatbelt backend, but the warning
+is still useful for policies that must also run on Linux.
 .Sh CAPABILITIES
 .Ss Process
 Process policy controls the initial command requested through
@@ -139,7 +141,9 @@ spawn;
 .It
 environment filtering before spawn;
 .It
-Linux filesystem path grants when Landlock can fully enforce them.
+Linux filesystem path grants when Landlock can fully enforce them;
+.It
+macOS filesystem path grants through Seatbelt sandbox profiles.
 .El
 .Pp
 The current runtime records, but does not fully enforce:
@@ -147,7 +151,7 @@ The current runtime records, but does not fully enforce:
 .It
 network decisions;
 .It
-filesystem decisions on non-Linux hosts;
+filesystem decisions on hosts without a Linux or macOS sandbox backend;
 .It
 future approval, MCP, browser, and secret-broker concepts.
 .El

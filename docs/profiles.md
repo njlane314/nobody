@@ -42,8 +42,8 @@ exist and the policy is regenerated or edited.
 ## Network defaults
 
 Coding profiles include package-registry host allowlists for policy simulation.
-Those host allowlists are diagnostic in the current runtime. The enforced Linux
-network primitive is deny-all egress with:
+Those host allowlists are diagnostic in the current runtime. The enforced
+network primitive on Linux and macOS is deny-all egress with:
 
 ```toml
 [net]

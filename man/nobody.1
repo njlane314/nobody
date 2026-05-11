@@ -57,12 +57,15 @@ The current runtime enforces process policy and environment filtering on every
 platform.
 On Linux it also uses Landlock to enforce filesystem read and write grants when
 the policy can be represented as granted path trees.
+On macOS it uses a Seatbelt sandbox profile to enforce filesystem read and
+write grants, including deny carve-outs below granted paths.
 When
 .Va net.deny
 contains
 .Qq * ,
-Linux runs also create a fresh network namespace for deny-all egress.
-On non-Linux hosts, filesystem policy is diagnostic only and
+Linux runs create a fresh network namespace for deny-all egress, while macOS
+runs deny network operations in the Seatbelt profile.
+On other hosts, filesystem policy is diagnostic only and
 .Nm
 prints a warning before spawning the command.
 .Pp
@@ -75,7 +78,10 @@ Report the current local runtime status for
 .Ar policy .
 The report includes operating system, policy path, trace path, process rules,
 environment filtering, configured MCP servers, sandbox backend, filesystem
-enforcement status, network enforcement status, and policy warnings.
+enforcement status, network enforcement status, policy warnings, and current
+limits.
+It explicitly reports that MCP mediation is proxy-only and that host network
+allowlists are diagnostic.
 The default policy path is
 .Pa nobody.toml .
 .It Xo

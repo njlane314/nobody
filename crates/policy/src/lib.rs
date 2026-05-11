@@ -276,7 +276,7 @@ impl Policy {
             let message = if self.net.allow.is_empty() {
                 "network deny-by-default policy is diagnostic unless deny = [\"*\"] requests deny-all egress".into()
             } else {
-                "network host allowlists are diagnostic; Linux runtime currently enforces only deny-all egress".into()
+                "network host allowlists are diagnostic; runtime currently enforces only deny-all egress".into()
             };
             diagnostics.push(PolicyDiagnostic {
                 level: DiagnosticLevel::Warning,

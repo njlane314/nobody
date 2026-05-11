@@ -14,8 +14,8 @@ The same backend preparation is reported by
 so users can see whether the selected policy is enforceable on the current
 host before running an agent.
 .Pp
-The current sandbox boundary is filesystem-focused, with one Linux network
-primitive for deny-all egress.
+The current sandbox boundary is filesystem-focused, with deny-all network
+egress primitives on Linux and macOS.
 Process policy and environment filtering happen in the runtime before spawn.
 Host allowlists, browser, and secret enforcement are not sandboxed yet.
 MCP tool calls are mediated separately by
@@ -66,11 +66,43 @@ Policies such as
 =
 .Qq github.com:443
 are currently diagnostic until a later proxy or namespace bridge exists.
+.Sh MACOS SEATBELT
+On macOS,
+.Nm
+uses the system Seatbelt sandbox profile API, the same profile language used by
+.Xr sandbox-exec 1 .
+The runtime applies the generated profile in the child after fork and before
+exec, preserving environment filtering and trace supervision in the parent.
+.Pp
+The profile imports
+.Pa system.sb ,
+denies by default, grants declared
+.Va fs.read
+and
+.Va fs.write
+paths, denies declared
+.Va fs.deny
+paths, and allows system read paths needed for command startup.
+Unlike Linux Landlock, Seatbelt can express deny carve-outs below granted
+paths, so this shape is enforceable on macOS:
+.Bd -literal
+[fs]
+read = ["."]
+deny = [".env"]
+.Ed
+.Pp
+When
+.Va net.deny
+contains
+.Qq * ,
+the profile denies network operations for the child and descendants.
+Host allowlists remain diagnostic.
 .Sh PATH RULES
 .Va fs.read
 and
 .Va fs.write
 entries must resolve to existing paths on Linux.
+On macOS, they must also resolve to existing paths.
 Relative paths are resolved from the working directory.
 .Pa ~/
 paths are expanded with
@@ -96,14 +128,14 @@ fails closed with a
 .Qq cannot enforce fs.deny
 diagnostic.
 Grant narrower paths instead.
-.Sh NON-LINUX HOSTS
-On macOS and other non-Linux platforms, the current backend is
+.Sh OTHER HOSTS
+On hosts other than Linux and macOS, the current backend is
 .Qq noop .
 It records
 .Va enforced=false
 and prints a warning:
 .Bd -literal
-nobody: WARNING: Landlock filesystem enforcement is only available on Linux; filesystem policy is diagnostic only
+nobody: WARNING: filesystem sandbox enforcement is not available on this platform; filesystem policy is diagnostic only
 .Ed
 .Pp
 The command still runs after process policy and environment filtering have
@@ -115,8 +147,6 @@ The current sandbox does not provide:
 network host allowlist enforcement;
 .It
 seccomp or namespace isolation beyond deny-all networking;
-.It
-macOS sandbox profiles;
 .It
 MCP transports not routed through
 .Cm nobody mcp proxy ;
@@ -133,6 +163,8 @@ event records:
 .It Va backend
 Backend name, such as
 .Qq landlock
+,
+.Qq sandbox-exec
 or
 .Qq noop .
 .It Va enforced

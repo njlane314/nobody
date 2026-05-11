@@ -1,7 +1,7 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::common::*;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn read_dotenv_is_denied() {
     let dir = EscapeDir::new("read-dotenv");
@@ -32,6 +32,9 @@ allow_args = ["-c"]
     );
 
     assert_denied(&output, "denied-dotenv");
+    #[cfg(target_os = "linux")]
     assert!(dir.trace().contains(r#""backend":"landlock""#));
+    #[cfg(target_os = "macos")]
+    assert!(dir.trace().contains(r#""backend":"sandbox-exec""#));
     assert!(dir.trace().contains(r#""enforced":true"#));
 }

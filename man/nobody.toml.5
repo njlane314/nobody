@@ -71,6 +71,7 @@ On Linux, Landlock enforcement can only represent allowlisted path trees.
 If a deny path sits underneath an already-granted path,
 .Nm nobody
 fails closed instead of pretending the carve-out is enforced.
+On macOS, Seatbelt profiles can express deny carve-outs below granted paths.
 .Ss net
 Network capability policy.
 .Bl -tag -width "mode" -compact

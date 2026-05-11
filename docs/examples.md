@@ -22,7 +22,8 @@ cargo run -- doctor --policy nobody.toml
 
 `doctor` reports the active policy, process rules, environment filtering, MCP
 servers, sandbox backend, filesystem enforcement status, network enforcement
-status, and policy warnings.
+status, policy warnings, and limits. In particular, it calls out that MCP is
+proxy-only and host network allowlists are diagnostic.
 
 Inspect the latest trace.
 
@@ -73,10 +74,10 @@ Argument-aware process rules allow conservative forms such as `cargo test` and
 deny risky interpreter forms such as `python -c` unless a policy explicitly
 allows that argv prefix.
 
-Filesystem simulation is diagnostic only in this prototype. It explains the
-policy decision. `nobody run` installs a Landlock filesystem boundary on Linux
-when the policy can be represented by allowlisted paths; on non-Linux hosts it
-prints a warning and records that filesystem enforcement is inactive.
+Filesystem simulation explains the policy decision. `nobody run` installs a
+Landlock filesystem boundary on Linux when the policy can be represented by
+allowlisted paths, and a Seatbelt sandbox profile on macOS. Other hosts print a
+warning and record that filesystem enforcement is inactive.
 
 For Linux deny-all network egress, set:
 
@@ -88,7 +89,7 @@ deny = ["*"]
 ```
 
 Host allowlists are currently diagnostic; deny-all is the enforced network
-primitive in 0.7.
+primitive on Linux and macOS.
 
 Proxy an MCP server over stdio.
 

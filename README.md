@@ -10,10 +10,10 @@ nobody is a least-privilege execution runtime for AI agents.
 nobody is designed to run autonomous software as a process with declared
 capabilities instead of inherited authority. The current runtime enforces
 process and environment policy, applies Linux Landlock filesystem boundaries
-when available, can deny all Linux network egress with a network namespace,
-mediates MCP tool calls routed through its stdio proxy, records structured
-trace evidence, and exposes host-level network allowlists as policy diagnostics
-until proxy-backed allowlist enforcement lands.
+and macOS Seatbelt filesystem boundaries when available, can deny all Linux or
+macOS network egress, mediates MCP tool calls routed through its stdio proxy,
+records structured trace evidence, and exposes host-level network allowlists
+as policy diagnostics until proxy-backed allowlist enforcement lands.
 
 Agents should run as nobody.
 
@@ -33,6 +33,10 @@ cargo run -- run -- echo hello
 cargo run -- policy simulate nobody.toml -- fs.read .env
 cargo run -- trace show latest
 ```
+
+`doctor` is the first command to run on a new host. It reports the selected
+sandbox backend, which boundaries are enforced, and which surfaces remain
+diagnostic or proxy-only.
 
 ```text
 agent / coding tool / MCP client
@@ -69,8 +73,9 @@ Currently enforced:
 - environment filtering by allow/deny patterns
 - Linux filesystem read/write boundaries through Landlock when the policy can
   be represented without deny carve-outs under granted paths
-- Linux deny-all network egress through a fresh network namespace when policy
-  uses `net.deny = ["*"]`
+- macOS filesystem read/write boundaries through the Seatbelt sandbox profile
+  API, including deny carve-outs below granted paths
+- deny-all network egress on Linux and macOS when policy uses `net.deny = ["*"]`
 - MCP `tools/call` allow/deny policy for JSON-RPC stdio traffic routed through
   `nobody mcp proxy`
 
@@ -96,11 +101,19 @@ scripts.
 
 Not enforced yet:
 
-- filesystem read/write boundaries on non-Linux hosts
+- filesystem read/write boundaries on hosts other than Linux and macOS
 - host allowlist network egress
 - MCP transports not routed through `nobody mcp proxy`
 - browser sessions
-- seccomp, namespace isolation beyond deny-all networking, or macOS sandboxing
+- seccomp or namespace isolation beyond deny-all networking
+
+MCP enforcement is intentionally narrow: only JSON-RPC stdio traffic routed
+through `nobody mcp proxy` is mediated.
+
+CI keeps the current claims explicit with separate Ubuntu jobs for Landlock
+escape tests, network namespace deny-all egress, MCP proxy allow/deny behavior,
+and profile-generated policies, plus a macOS job for Seatbelt filesystem and
+deny-all network escapes.
 
 ## Documentation
 

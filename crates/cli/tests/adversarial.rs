@@ -389,10 +389,14 @@ fn doctor_reports_runtime_status() {
     assert!(out.contains("runtime:"), "{out}");
     assert!(out.contains("process allow:"), "{out}");
     assert!(out.contains("environment clear: true"), "{out}");
+    assert!(out.contains("mcp scope: proxy-only"), "{out}");
     assert!(out.contains("sandbox:"), "{out}");
     assert!(out.contains("backend:"), "{out}");
     assert!(out.contains("filesystem:"), "{out}");
     assert!(out.contains("network:"), "{out}");
+    assert!(out.contains("limits:"), "{out}");
+    assert!(out.contains("network host allowlists: diagnostic"), "{out}");
+    assert!(out.contains("mcp: proxy-only"), "{out}");
     assert!(out.contains("status:"), "{out}");
 }
 
@@ -579,7 +583,7 @@ fn allowed_process_records_allow_trace_event() {
     assert!(trace.contains("process.started"));
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[test]
 fn non_linux_run_warns_that_filesystem_sandbox_is_noop() {
     let dir = TestDir::new("noop-warning");
@@ -595,6 +599,24 @@ fn non_linux_run_warns_that_filesystem_sandbox_is_noop() {
     assert!(stderr(&output).contains("filesystem policy is diagnostic only"));
     assert!(dir.trace().contains("sandbox.prepared"));
     assert!(dir.trace().contains(r#""enforced":false"#));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_run_uses_sandbox_exec() {
+    let dir = TestDir::new("macos-sandbox-exec");
+    dir.write_policy();
+
+    let output = run_in(
+        dir.path(),
+        &["run", "--policy", "nobody.toml", "--", "echo", "hello"],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let trace = dir.trace();
+    assert!(trace.contains(r#""backend":"sandbox-exec""#), "{trace}");
+    assert!(trace.contains(r#""filesystem_enforced":true"#), "{trace}");
+    assert!(trace.contains(r#""enforced":true"#), "{trace}");
 }
 
 #[test]

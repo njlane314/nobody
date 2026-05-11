@@ -1,7 +1,7 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::common::*;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn write_outside_repo_is_denied() {
     let dir = EscapeDir::new("write-outside-repo");

@@ -3,19 +3,21 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 use anyhow::{Context, bail};
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 use std::collections::BTreeSet;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 use std::env;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 use std::path::{Component, Path};
 
 #[cfg(target_os = "linux")]
 mod linux_landlock;
 #[cfg(target_os = "linux")]
 mod linux_netns;
+#[cfg(target_os = "macos")]
+mod macos_sandbox_exec;
 mod noop;
 
 pub use noop::NoopSandbox;
@@ -65,8 +67,10 @@ pub trait PreparedSandboxBackend {
 }
 
 pub struct LinuxLandlockSandbox;
+#[cfg(target_os = "macos")]
+pub struct MacSandboxExecSandbox;
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[cfg_attr(test, allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedSandboxSpec {
@@ -125,13 +129,13 @@ impl NetworkSandboxSpec {
 
         if deny_by_default {
             return NetworkSandboxPlan::Diagnostic {
-                warning: "network deny-by-default policy is diagnostic unless deny = [\"*\"] requests deny-all namespace enforcement".into(),
+                warning: "network deny-by-default policy is diagnostic unless deny = [\"*\"] requests deny-all egress enforcement".into(),
             };
         }
 
         if !self.deny.is_empty() {
             return NetworkSandboxPlan::Diagnostic {
-                warning: "network deny lists are diagnostic unless deny = [\"*\"] requests deny-all namespace enforcement".into(),
+                warning: "network deny lists are diagnostic unless deny = [\"*\"] requests deny-all egress enforcement".into(),
             };
         }
 
@@ -147,21 +151,17 @@ impl NetworkSandboxSpec {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Sandbox for LinuxLandlockSandbox {
     fn prepare(&self, spec: &SandboxSpec) -> Result<PreparedSandbox> {
-        #[cfg(target_os = "linux")]
-        {
-            linux_landlock::prepare(spec)
-        }
+        linux_landlock::prepare(spec)
+    }
+}
 
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = spec;
-            NoopSandbox::new(
-                "Landlock filesystem enforcement is only available on Linux; filesystem policy is diagnostic only",
-            )
-            .prepare(spec)
-        }
+#[cfg(target_os = "macos")]
+impl Sandbox for MacSandboxExecSandbox {
+    fn prepare(&self, spec: &SandboxSpec) -> Result<PreparedSandbox> {
+        macos_sandbox_exec::prepare(spec)
     }
 }
 
@@ -171,16 +171,33 @@ pub fn platform_default_sandbox() -> Box<dyn Sandbox> {
         Box::new(LinuxLandlockSandbox)
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacSandboxExecSandbox)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         Box::new(NoopSandbox::new(
-            "Landlock filesystem enforcement is only available on Linux; filesystem policy is diagnostic only",
+            "filesystem sandbox enforcement is not available on this platform; filesystem policy is diagnostic only",
         ))
     }
 }
 
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn resolve_spec(spec: &SandboxSpec) -> Result<ResolvedSandboxSpec> {
+    resolve_spec_inner(spec, true)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn resolve_spec_allowing_deny_carveouts(
+    spec: &SandboxSpec,
+) -> Result<ResolvedSandboxSpec> {
+    resolve_spec_inner(spec, false)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn resolve_spec_inner(spec: &SandboxSpec, reject_carveouts: bool) -> Result<ResolvedSandboxSpec> {
     let cwd = absolutize_existing_dir(&spec.working_dir)
         .with_context(|| format!("invalid working directory: {}", spec.working_dir.display()))?;
 
@@ -188,7 +205,9 @@ pub(crate) fn resolve_spec(spec: &SandboxSpec) -> Result<ResolvedSandboxSpec> {
     let write_paths = resolve_existing_paths(&cwd, &spec.fs_write, "fs.write")?;
     let deny_paths = resolve_policy_paths(&cwd, &spec.fs_deny);
 
-    reject_deny_carveouts(&deny_paths, read_paths.iter().chain(write_paths.iter()))?;
+    if reject_carveouts {
+        reject_deny_carveouts(&deny_paths, read_paths.iter().chain(write_paths.iter()))?;
+    }
 
     Ok(ResolvedSandboxSpec {
         working_dir: cwd,
@@ -249,7 +268,7 @@ fn insert_support_path(paths: &mut BTreeSet<PathBuf>, path: PathBuf, working_dir
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn resolve_existing_paths(cwd: &Path, raw_paths: &[PathBuf], label: &str) -> Result<Vec<PathBuf>> {
     let mut paths = BTreeSet::new();
 
@@ -263,7 +282,7 @@ fn resolve_existing_paths(cwd: &Path, raw_paths: &[PathBuf], label: &str) -> Res
     Ok(paths.into_iter().collect())
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn resolve_policy_paths(cwd: &Path, raw_paths: &[PathBuf]) -> Vec<PathBuf> {
     raw_paths
         .iter()
@@ -271,7 +290,7 @@ fn resolve_policy_paths(cwd: &Path, raw_paths: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn resolve_policy_path(cwd: &Path, path: &Path) -> PathBuf {
     let expanded = expand_tilde(path).unwrap_or_else(|| path.to_path_buf());
     if expanded.is_absolute() {
@@ -281,7 +300,7 @@ fn resolve_policy_path(cwd: &Path, path: &Path) -> PathBuf {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn expand_tilde(path: &Path) -> Option<PathBuf> {
     let raw = path.to_string_lossy();
     let rest = raw.strip_prefix("~/")?;
@@ -289,7 +308,7 @@ fn expand_tilde(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(home).join(rest))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn absolutize_existing_dir(path: &Path) -> Result<PathBuf> {
     let path = absolutize_existing(path)?;
     if !path.is_dir() {
@@ -298,13 +317,13 @@ fn absolutize_existing_dir(path: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn absolutize_existing(path: &Path) -> Result<PathBuf> {
     path.canonicalize()
         .with_context(|| format!("path does not exist: {}", path.display()))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn normalize_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
 
@@ -329,12 +348,12 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn path_contains(root: &Path, child: &Path) -> bool {
     child == root || child.starts_with(root)
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) fn reject_deny_carveouts<'a>(
     deny_paths: &[PathBuf],
     allow_paths: impl Iterator<Item = &'a PathBuf>,
@@ -356,7 +375,7 @@ pub(crate) fn reject_deny_carveouts<'a>(
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn display_path(path: &Path) -> String {
     path.display().to_string()
 }

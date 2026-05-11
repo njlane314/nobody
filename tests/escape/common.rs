@@ -184,6 +184,22 @@ pub fn command_available(program: &str) -> bool {
         .is_ok()
 }
 
+pub fn command_path(program: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if program == "python3" {
+        if let Ok(output) = Command::new("xcrun").args(["-f", "python3"]).output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if !path.is_empty() {
+                    return path;
+                }
+            }
+        }
+    }
+
+    program.into()
+}
+
 pub fn mkdir(path: impl AsRef<Path>) {
     fs::create_dir_all(path).unwrap();
 }

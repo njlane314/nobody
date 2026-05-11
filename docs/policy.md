@@ -2,12 +2,12 @@
 
 `nobody` reads policy from `nobody.toml`.
 
-The current prototype parses agent, task, filesystem, network, process,
+The current runtime parses agent, task, filesystem, network, process,
 environment, approval, and trace sections. Process policy, environment
-filtering, Linux filesystem boundaries, and explicit Linux deny-all network
-egress are enforced today. Host-level network allowlists, approval, and tool
-sections describe the intended policy surface and are parsed so the file shape
-can stabilize before those enforcement backends land.
+filtering, Linux and macOS filesystem boundaries, explicit deny-all network
+egress, and stdio MCP tool policy are enforced today. Host-level network
+allowlists and approvals describe the intended policy surface and are parsed so
+the file shape can stabilize before those enforcement backends land.
 
 ## Example
 
@@ -151,11 +151,10 @@ allow_args = ["status", "diff", "log", "show", "add", "commit"]
 
 ## Filesystem
 
-Filesystem policy is parsed and evaluated by the policy crate. It is not yet
-enforced on every platform. On Linux, the runtime installs a Landlock boundary
-before the child process starts and requires fully enforced ABI v3 filesystem
-rights. On non-Linux hosts, filesystem policy remains diagnostic and the
-runtime prints a warning before spawning the command.
+Filesystem policy is parsed and evaluated by the policy crate. It is enforced
+on Linux with Landlock and on macOS with a Seatbelt sandbox profile. Other
+hosts remain diagnostic and the runtime prints a warning before spawning the
+command.
 
 Filesystem simulation normalizes paths lexically before matching rules. For
 example, `./src/../.env` is evaluated as `.env`. It also compares `~/...`
@@ -168,6 +167,9 @@ an explicit deny beneath an already-granted tree. A policy such as `read = ["."]
 with `deny = [".env"]` is useful for simulation, but `nobody run` fails closed
 on Linux instead of pretending that carve-out is enforceable. Grant narrower
 paths when you need real filesystem enforcement.
+
+macOS Seatbelt profiles can express deny carve-outs below granted paths, so the
+same `read = ["."]` with `deny = [".env"]` shape is enforceable on macOS.
 
 ```sh
 nobody policy simulate nobody.toml -- fs.read .env
@@ -196,7 +198,8 @@ Network policy is parsed and can be evaluated by the policy crate.
 
 On Linux, `deny = ["*"]` requests a fresh network namespace before the child
 execs. That namespace starts without host routes, so outbound egress is denied
-for the process and its descendants. The trace records this as
+for the process and its descendants. On macOS, `deny = ["*"]` denies network
+operations in the Seatbelt profile. The trace records both as
 `network_mode="deny-all"` and `network_enforced=true`.
 
 Host allowlists are not raw-socket enforcement yet. With

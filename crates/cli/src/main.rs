@@ -172,6 +172,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
     println!("  environment allow: {}", list_or_none(&policy.env.allow));
     println!("  environment deny: {}", list_or_none(&policy.env.deny));
     println!("  mcp servers: {}", mcp_servers_or_none(&policy));
+    println!("  mcp scope: proxy-only; only traffic routed through nobody mcp proxy is mediated");
     println!();
     println!("sandbox:");
 
@@ -224,6 +225,17 @@ fn doctor(args: DoctorArgs) -> Result<()> {
             println!("  {level}[{}]: {}", diagnostic.code, diagnostic.message);
         }
     }
+
+    println!();
+    println!("limits:");
+    println!("  network host allowlists: diagnostic");
+    println!(
+        "  network deny-all: {}",
+        network_deny_all_label(&sandbox_status)
+    );
+    println!("  mcp: proxy-only");
+    println!("  browser: not enforced");
+    println!("  approvals: fail-closed when requested");
 
     println!();
     if sandbox_status.is_ok() {
@@ -450,7 +462,7 @@ fn print_decision(decision: &Decision) {
 
     if matches!(reason.resource, Resource::Network { .. }) {
         println!(
-            "note: network host allowlists are diagnostic; deny = [\"*\"] is the current Linux egress enforcement primitive"
+            "note: network host allowlists are diagnostic; deny = [\"*\"] is the current egress enforcement primitive"
         );
     }
 
@@ -527,6 +539,15 @@ fn mcp_servers_or_none(policy: &Policy) -> String {
 
 fn enforcement_label(enforced: bool) -> &'static str {
     if enforced { "enforced" } else { "diagnostic" }
+}
+
+fn network_deny_all_label(status: &Result<nobody_sandbox::SandboxStatus, anyhow::Error>) -> String {
+    match status {
+        Ok(status) if status.network_enforced => "enforced".into(),
+        Ok(status) if status.network_mode == "deny-all" => "unavailable".into(),
+        Ok(_) => "available with net.deny = [\"*\"]".into(),
+        Err(_) => "unknown".into(),
+    }
 }
 
 fn list_or_none(values: &[String]) -> String {

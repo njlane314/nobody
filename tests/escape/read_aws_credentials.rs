@@ -1,7 +1,7 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::common::*;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn read_aws_credentials_is_denied() {
     let dir = EscapeDir::new("read-aws-credentials");

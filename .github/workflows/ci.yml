@@ -5,10 +5,42 @@ on:
   pull_request:
 
 jobs:
-  check:
+  workspace:
+    name: workspace / ubuntu
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: make check
+      - run: cargo run -- doctor --policy nobody.toml
+
+  linux-runtime-guarantees:
+    name: runtime guarantees / ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Landlock filesystem escape suite
+        run: cargo test -p nobody-cli --test escape -- --nocapture
+      - name: Netns deny-all egress
+        run: cargo test -p nobody-cli --test escape network_egress_is_denied -- --nocapture
+      - name: MCP proxy allow/deny behavior
+        run: cargo test -p nobody-cli --test adversarial mcp_proxy -- --nocapture
+      - name: Profile-generated policies
+        run: cargo test -p nobody-cli --test adversarial init_ -- --nocapture
+      - name: Doctor report
+        run: cargo run -- doctor --policy nobody.toml
+
+  macos-runtime-guarantees:
+    name: runtime guarantees / macos
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Seatbelt filesystem and deny-all network escapes
+        run: cargo test -p nobody-cli --test escape -- --nocapture
+      - name: Doctor report
+        run: cargo run -- doctor --policy nobody.toml
