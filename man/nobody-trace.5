@@ -1,0 +1,126 @@
+.Dd May 11, 2026
+.Dt NOBODY-TRACE 5
+.Os
+.Sh NAME
+.Nm nobody-trace
+.Nd JSONL trace format for nobody runs
+.Sh DESCRIPTION
+.Xr nobody 1
+writes newline-delimited JSON events to the configured trace path.
+The default path is
+.Pa .nobody/runs/latest.jsonl .
+.Pp
+Trace files are append-only by convention in the current prototype.
+They are not sealed, signed, replayable, or protected against local
+modification.
+.Sh EVENT FORMAT
+Each line is one JSON object with these fields:
+.Bl -tag -width "parent_event_id"
+.It Va schema_version
+Trace schema identifier.
+The current writer emits
+.Qq nobody.trace.v1 .
+.It Va run_id
+Runtime-generated run identifier.
+.It Va event_id
+Event identifier within the run.
+.It Va parent_event_id
+Optional parent event identifier.
+Currently null.
+.It Va ts_ms
+Unix timestamp in milliseconds.
+.It Va actor
+Object identifying the event writer.
+The current writer uses
+.Qq runtime
+and
+.Qq local .
+.It Va kind
+Event name.
+.It Va decision
+Optional policy decision summary.
+.It Va data
+Event-specific payload.
+.El
+.Sh DECISION SUMMARY
+Decision events include a
+.Va decision
+object with:
+.Bl -tag -width "matched_pattern" -compact
+.It Va decision
+.Qq allow ,
+.Qq deny ,
+or
+.Qq ask .
+.It Va rule_id
+Matched policy rule, such as
+.Qq process.allow .
+.It Va resource
+Structured resource object.
+.It Va action
+Action kind, such as
+.Qq process_exec .
+.It Va matched_pattern
+Policy pattern that matched, if any.
+.It Va message
+Human-readable reason.
+.El
+.Sh EVENT KINDS
+.Bl -tag -width "process.exec.allow"
+.It Va run.created
+Records the requested command in
+.Va data.command .
+.It Va policy.loaded
+Records the policy path and selected trace path.
+.It Va process.exec.allow
+Records an allowed process decision before spawn.
+.It Va process.exec.deny
+Records a denied process decision before spawn.
+.It Va env.filtered
+Records
+.Va clear ,
+.Va allowed_count ,
+.Va denied_count ,
+and the allowed and denied variable names.
+Values are not recorded.
+.It Va sandbox.prepared
+Records the sandbox backend, whether it is enforced, and any warning.
+.It Va process.started
+Records the spawned program and process id.
+.It Va process.exited
+Records the child process exit code and success flag.
+.It Va run.completed
+Records the final run exit code and success flag.
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa .nobody/runs/latest.jsonl
+Default trace path.
+.El
+.Sh EXAMPLES
+.Bd -literal
+{"schema_version":"nobody.trace.v1","run_id":"run-1760000000000-1","event_id":"evt-1","parent_event_id":null,"ts_ms":1760000000000,"actor":{"kind":"runtime","id":"local"},"kind":"run.created","decision":null,"data":{"command":["echo","hello"]}}
+.Ed
+.Pp
+Show the latest run in a compact terminal view:
+.Bd -literal
+nobody trace show latest
+.Ed
+.Pp
+Show the latest run as JSONL:
+.Bd -literal
+nobody trace show latest --jsonl
+.Ed
+.Sh STABILITY
+The
+.Qq nobody.trace.v1
+schema is the current local schema.
+Readers should ignore unknown fields and preserve unrecognized event kinds.
+.Pp
+The bundled reader also accepts older minimal trace lines and exposes them as
+.Qq nobody.trace.legacy
+events for display.
+.Sh SEE ALSO
+.Xr nobody 1 ,
+.Xr nobody.toml 5 ,
+.Xr nobody-policy 7

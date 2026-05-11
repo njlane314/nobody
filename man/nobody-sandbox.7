@@ -1,0 +1,116 @@
+.Dd May 11, 2026
+.Dt NOBODY-SANDBOX 7
+.Os
+.Sh NAME
+.Nm nobody-sandbox
+.Nd sandbox backend behavior for nobody
+.Sh DESCRIPTION
+.Xr nobody 1
+prepares a sandbox before spawning the requested command.
+The selected backend is recorded in the trace as
+.Va sandbox.prepared .
+.Pp
+The current sandbox boundary is filesystem-focused.
+Process policy and environment filtering happen in the runtime before spawn.
+Network, MCP, browser, and secret enforcement are not sandboxed yet.
+.Sh LINUX LANDLOCK
+On Linux,
+.Nm
+uses Landlock as the default filesystem backend.
+The runtime resolves policy paths relative to the current working directory,
+adds read and write grants, and installs the Landlock rules in the child after
+fork and before exec.
+The parent runtime remains outside the child sandbox so it can write trace
+events and supervise the process.
+.Pp
+The backend requires fully enforced Landlock ABI v3 filesystem rights.
+If the kernel or host configuration reports partial enforcement, no
+enforcement, or no Landlock support, the run fails.
+.Pp
+Read support paths are added for command startup and dynamic linking.
+The backend derives paths from
+.Ev PATH
+and common system locations such as
+.Pa /bin ,
+.Pa /usr ,
+.Pa /lib ,
+and selected device files.
+Policy read/write grants are still the application-specific boundary.
+.Sh PATH RULES
+.Va fs.read
+and
+.Va fs.write
+entries must resolve to existing paths on Linux.
+Relative paths are resolved from the working directory.
+.Pa ~/
+paths are expanded with
+.Ev HOME .
+.Pp
+.Va fs.deny
+entries are normalized for carve-out checks.
+Landlock is allowlist-based and cannot express
+.Qq deny this child path below an allowed parent .
+For example, this policy can be simulated:
+.Bd -literal
+[fs]
+read = ["."]
+deny = [".env"]
+.Ed
+.Pp
+but it cannot be faithfully enforced by Landlock because
+.Pa .env
+sits under the granted current-directory tree.
+On Linux,
+.Xr nobody 1
+fails closed with a
+.Qq cannot enforce fs.deny
+diagnostic.
+Grant narrower paths instead.
+.Sh NON-LINUX HOSTS
+On macOS and other non-Linux platforms, the current backend is
+.Qq noop .
+It records
+.Va enforced=false
+and prints a warning:
+.Bd -literal
+nobody: WARNING: Landlock filesystem enforcement is only available on Linux; filesystem policy is diagnostic only
+.Ed
+.Pp
+The command still runs after process policy and environment filtering have
+succeeded.
+.Sh LIMITATIONS
+The current sandbox does not provide:
+.Bl -bullet -compact
+.It
+network egress enforcement;
+.It
+seccomp or namespace isolation;
+.It
+macOS sandbox profiles;
+.It
+MCP/tool-call mediation;
+.It
+browser-control mediation;
+.It
+secret-broker mediation.
+.El
+.Sh TRACE
+The
+.Va sandbox.prepared
+event records:
+.Bl -tag -width "enforced" -compact
+.It Va backend
+Backend name, such as
+.Qq landlock
+or
+.Qq noop .
+.It Va enforced
+Boolean enforcement status.
+.It Va warning
+Backend warning, if any.
+.El
+.Sh SEE ALSO
+.Xr nobody 1 ,
+.Xr nobody-trace 5 ,
+.Xr nobody.toml 5 ,
+.Xr nobody-policy 7

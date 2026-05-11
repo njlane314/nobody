@@ -1,0 +1,211 @@
+.Dd May 11, 2026
+.Dt NOBODY.TOML 5
+.Os
+.Sh NAME
+.Nm nobody.toml
+.Nd policy file format for nobody
+.Sh DESCRIPTION
+.Nm
+is the TOML policy format read by
+.Xr nobody 1 .
+The file declares the capabilities available to a run: process execution,
+environment inheritance, filesystem grants, network diagnostics, approval
+requirements, and trace output.
+.Pp
+Unknown tables or fields are rejected.
+Missing tables use conservative empty defaults, except where noted below.
+.Sh TABLES
+.Ss agent
+Optional descriptive metadata.
+.Bl -tag -width "description" -compact
+.It Va name
+Agent name.
+.It Va kind
+Agent kind, such as
+.Qq local-cli .
+.It Va description
+Free-form description.
+.El
+.Pp
+These fields are parsed but not enforced.
+.Ss task
+Optional task metadata.
+.Bl -tag -width "max_duration" -compact
+.It Va id
+Task identifier.
+.It Va repo
+Repository path.
+.It Va max_duration
+Duration string reserved for future time limits.
+.El
+.Pp
+These fields are parsed but not enforced.
+.Ss fs
+Filesystem capability policy.
+.Bl -tag -width "write" -compact
+.It Va read
+Array of readable path grants.
+.It Va write
+Array of writable path grants.
+.It Va deny
+Array of denied paths.
+.El
+.Pp
+Policy simulation normalizes paths lexically before matching, so
+.Pa ./src/../.env
+is evaluated as
+.Pa .env .
+Patterns beginning with
+.Pa ~/
+are compared against the current
+.Ev HOME
+path as well as the literal policy text.
+.Pp
+.Va fs.deny
+wins over
+.Va fs.read
+and
+.Va fs.write
+for policy decisions.
+On Linux, Landlock enforcement can only represent allowlisted path trees.
+If a deny path sits underneath an already-granted path,
+.Nm nobody
+fails closed instead of pretending the carve-out is enforced.
+.Ss net
+Network capability policy.
+.Bl -tag -width "mode" -compact
+.It Va mode
+Network default mode.
+The documented mode is
+.Qq deny-by-default ,
+which is also the default when the field is omitted.
+.It Va allow
+Array of allowed host or
+.Ar host:port
+patterns.
+.It Va deny
+Array of denied host or
+.Ar host:port
+patterns.
+.El
+.Pp
+Network decisions are currently diagnostic.
+Traffic is not blocked by the runtime yet.
+Explicit deny rules win.
+With
+.Va mode
+set to
+.Qq deny-by-default ,
+or with a non-empty
+.Va allow
+list, endpoints must match
+.Va net.allow .
+.Ss process
+Process execution policy.
+.Bl -tag -width "allow" -compact
+.It Va allow
+Array of allowed program names.
+.It Va deny
+Array of denied program names.
+.El
+.Pp
+.Va process.deny
+always wins.
+If
+.Va process.allow
+is empty, processes are allowed unless denied.
+If it is non-empty, the requested program must match it.
+Commands match either the exact program string or its basename, so
+.Qq git
+matches both
+.Qq git
+and
+.Pa /usr/bin/git .
+.Ss env
+Environment inheritance policy.
+.Bl -tag -width "clear" -compact
+.It Va clear
+Boolean.
+Defaults to false.
+When true, the child environment starts empty.
+.It Va allow
+Array of allowed variable-name patterns.
+Used when
+.Va clear
+is true.
+.It Va deny
+Array of denied variable-name patterns.
+.El
+.Pp
+.Va env.deny
+wins over
+.Va env.allow .
+If
+.Va clear
+is false, variables are inherited unless they match
+.Va env.deny .
+Trace events record variable names and counts, but not values.
+.Ss approval
+Approval policy.
+.Bl -tag -width "require" -compact
+.It Va require
+Array of approval gate names.
+.El
+.Pp
+Approval fields are parsed for schema stability.
+The current runtime does not stop for interactive approval.
+.Ss trace
+Trace output policy.
+.Bl -tag -width "redact" -compact
+.It Va path
+JSONL trace path.
+Defaults to
+.Pa .nobody/runs/latest.jsonl .
+.It Va redact
+Array of redaction patterns reserved for trace and broker integrations.
+.El
+.Pp
+The current trace writer avoids recording environment values.
+.Va trace.redact
+is parsed but is not a general-purpose output scrubber yet.
+.Sh PATTERNS
+.Nm
+supports simple asterisk wildcards in environment, network, and path matching.
+An asterisk matches any substring.
+There is no support for question-mark wildcards, character classes, brace
+expansion, or shell evaluation.
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa nobody.toml
+Default policy path.
+.El
+.Sh EXAMPLES
+.Bd -literal
+[fs]
+read = ["./Cargo.toml", "./Cargo.lock", "./crates", "./docs", "./man"]
+write = ["./Cargo.toml", "./Cargo.lock", "./README.md", "./crates", "./docs", "./man"]
+deny = [".env", "~/.ssh", "~/.aws"]
+
+[net]
+mode = "deny-by-default"
+allow = ["github.com:443", "api.anthropic.com:443"]
+deny = []
+
+[process]
+allow = ["echo", "git", "cargo", "rustc"]
+deny = ["rm", "curl", "scp", "ssh"]
+
+[env]
+clear = true
+allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL"]
+deny = ["*TOKEN*", "*KEY*", "AWS_*", "DATABASE_URL", "SSH_AUTH_SOCK"]
+
+[trace]
+path = ".nobody/runs/latest.jsonl"
+redact = ["*TOKEN*", "*KEY*", "Authorization"]
+.Ed
+.Sh SEE ALSO
+.Xr nobody 1 ,
+.Xr nobody-trace 5 ,
+.Xr nobody-policy 7 ,
+.Xr nobody-sandbox 7

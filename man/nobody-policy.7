@@ -1,0 +1,112 @@
+.Dd May 11, 2026
+.Dt NOBODY-POLICY 7
+.Os
+.Sh NAME
+.Nm nobody-policy
+.Nd capability model for nobody
+.Sh DESCRIPTION
+.Xr nobody 1
+turns ambient authority into declared capabilities.
+A policy describes which resources an agent may use before the runtime starts
+work, and the runtime records its decisions in a trace.
+.Pp
+The model is intentionally small:
+.Bl -tag -width "decision" -compact
+.It Em action
+Something the subject wants to do, such as executing a process or reading a
+file.
+.It Em resource
+The object named by the action, such as a path, host, process, or environment
+variable.
+.It Em decision
+The policy result:
+.Qq allow ,
+.Qq deny ,
+or the reserved
+.Qq ask .
+.El
+.Sh PRECEDENCE
+Explicit deny rules win over allow rules.
+When an allow list is non-empty, unmatched resources are denied for that
+capability.
+The current approval model is parsed but not yet used to pause for interactive
+approval.
+.Sh CAPABILITIES
+.Ss Process
+Process policy controls the initial command requested through
+.Cm nobody run .
+The runtime checks
+.Va process.deny
+and
+.Va process.allow
+before spawning the command.
+.Pp
+This is not yet a full process-tree execution monitor.
+Use filesystem sandboxing and narrow command allow lists together.
+.Ss Environment
+Environment policy controls which inherited variables reach the child process.
+When
+.Va env.clear
+is true, only allowed and non-denied names are re-added.
+When false, the environment is inherited except for denied names.
+.Pp
+Trace events record environment names and counts, not values.
+.Ss Filesystem
+Filesystem policy names readable, writable, and denied paths.
+Policy simulation explains decisions for individual
+.Cm fs.read
+and
+.Cm fs.write
+actions.
+.Pp
+On Linux, the runtime attempts to translate read and write grants into a
+Landlock boundary for the child process.
+On other platforms, filesystem policy remains diagnostic.
+See
+.Xr nobody-sandbox 7
+for backend details.
+.Ss Network
+Network policy names hosts or endpoints that would be allowed or denied.
+The current runtime can simulate
+.Cm net.connect
+decisions, but it does not yet enforce network egress.
+.Ss MCP and Tools
+MCP and tool-call mediation are part of the intended policy surface, but the
+current local runtime does not proxy MCP servers or enforce tool-level grants.
+.Ss Secrets
+Secrets are currently handled indirectly through filesystem denies and
+environment filtering.
+There is not yet a dedicated secret broker.
+.Ss Approvals
+Approval requirements are parsed for schema stability.
+The current runtime does not yet emit pending approval requests or wait for a
+human decision.
+.Ss Trace
+Trace output is the audit surface.
+Every run records lifecycle events, the process decision, environment filtering
+summary, sandbox backend status, and exit status.
+.Sh CURRENT GUARANTEES
+The current runtime enforces:
+.Bl -bullet -compact
+.It
+the requested process decision before spawn;
+.It
+environment filtering before spawn;
+.It
+Linux filesystem path grants when Landlock can fully enforce them.
+.El
+.Pp
+The current runtime records, but does not fully enforce:
+.Bl -bullet -compact
+.It
+network decisions;
+.It
+filesystem decisions on non-Linux hosts;
+.It
+future approval, MCP, browser, and secret-broker concepts.
+.El
+.Sh SEE ALSO
+.Xr nobody 1 ,
+.Xr nobody-trace 5 ,
+.Xr nobody.toml 5 ,
+.Xr nobody-sandbox 7

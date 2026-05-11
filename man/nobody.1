@@ -12,48 +12,149 @@
 .Ar command
 .Op Ar argument ...
 .Nm
+.Cm policy check
+.Op Ar policy
+.Nm
 .Cm policy simulate
-.Ar policy
+.Op Ar policy
 .Fl -
 .Ar action
 .Op Ar argument ...
 .Nm
 .Cm trace show
-.Op Ar latest | file
 .Op Fl -jsonl
+.Op Ar latest | file
 .Sh DESCRIPTION
 .Nm
-is a least-privilege execution runtime for AI agents.
-The current prototype reads a TOML policy, evaluates process and environment
-capability decisions, runs the permitted command with a filtered environment,
-prepares the strongest available filesystem sandbox, and appends structured
-JSONL trace events.
+is a least-privilege execution runtime for AI agents and other autonomous
+software.
+It reads a TOML policy, evaluates capability decisions, filters the child
+environment, prepares the strongest available filesystem sandbox, runs the
+permitted command, and appends structured JSONL trace events.
 .Pp
-On Linux,
-.Nm
-uses Landlock to enforce filesystem read/write grants when the policy can be
-represented without deny carve-outs beneath granted paths.
-The current backend requires fully enforced Landlock ABI v3 filesystem rights.
-On other platforms, filesystem policy is diagnostic only and
+The current runtime enforces process policy and environment filtering on every
+platform.
+On Linux it also uses Landlock to enforce filesystem read and write grants when
+the policy can be represented as granted path trees.
+On non-Linux hosts, filesystem policy is diagnostic only and
 .Nm
 prints a warning before spawning the command.
 .Pp
-Network, MCP, and browser-control enforcement are planned but are not
-implemented in this milestone.
+Network, MCP, browser-control, and secret-broker enforcement are planned but are
+not implemented in this milestone.
+.Sh COMMANDS
+.Bl -tag -width Ds
+.It Xo
+.Cm run
+.Op Fl p Ar policy
+.Fl -
+.Ar command
+.Op Ar argument ...
+.Xc
+Run
+.Ar command
+under
+.Ar policy .
+The default policy path is
+.Pa nobody.toml .
+If the requested process is denied, the command is not spawned.
+.It Cm policy check Op Ar policy
+Parse
+.Ar policy
+and report the trace path that would be used.
+The default policy path is
+.Pa nobody.toml .
+.It Xo
+.Cm policy simulate
+.Op Ar policy
+.Fl -
+.Ar action
+.Op Ar argument ...
+.Xc
+Evaluate a single policy action without running a command.
+Supported action forms are:
+.Pp
+.Bl -tag -width "net.connect host:port" -compact
+.It Cm process.exec Ar program Op Ar argument ...
+.It Cm env.read Ar name
+.It Cm fs.read Ar path
+.It Cm fs.write Ar path
+.It Cm net.connect Ar host:port
+.El
+.It Xo
+.Cm trace show
+.Op Fl -jsonl
+.Op Ar latest | file
+.Xc
+Read trace events.
+The default target is
+.Cm latest ,
+which reads
+.Pa .nobody/runs/latest.jsonl
+and shows only the last run in that append-only file.
+With
+.Fl -jsonl ,
+print selected events as newline-delimited JSON instead of the compact terminal
+view.
+.El
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It Fl p , Fl -policy Ar file
 Read policy from
 .Ar file .
-The default is
-.Pa nobody.toml .
+Used by
+.Cm run .
+.It Fl -jsonl
+Print trace events as JSONL.
+Used by
+.Cm trace show .
+.It Fl h , Fl -help
+Show command help.
+.It Fl V , Fl -version
+Show the program version.
 .El
+.Sh ENVIRONMENT
+.Nm
+does not require special environment variables.
+.Pp
+The parent environment is evaluated against the policy's
+.Va env
+table before the child process starts.
+If
+.Va env.clear
+is true, the child receives only variables that match
+.Va env.allow
+and do not match
+.Va env.deny .
+If
+.Va env.clear
+is false, variables are inherited unless denied.
+.Pp
+.Ev PATH
+controls normal operating-system command lookup for the child process.
+.Ev HOME
+is used when policy matching compares
+.Pa ~/...
+patterns with expanded home-directory paths.
 .Sh FILES
 .Bl -tag -width Ds
 .It Pa nobody.toml
 Default policy file.
 .It Pa .nobody/runs/latest.jsonl
-Default trace file.
+Default append-only trace file.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+The command or inspection operation completed successfully.
+.It Ar n
+.Cm run
+exits with the child command's non-zero exit status when the command starts and
+then fails.
+.It 1
+The policy could not be read, policy evaluation denied the requested process,
+the trace could not be read, sandbox preparation failed, or the child terminated
+without an ordinary exit code.
 .El
 .Sh EXAMPLES
 .Bd -literal
@@ -61,11 +162,33 @@ nobody run -- echo hello
 nobody run --policy nobody.toml -- echo hello
 nobody policy check nobody.toml
 nobody policy simulate nobody.toml -- fs.read .env
+nobody policy simulate nobody.toml -- fs.write README.md
 nobody policy simulate nobody.toml -- process.exec curl
+nobody policy simulate nobody.toml -- net.connect github.com:443
 nobody trace show latest
 nobody trace show latest --jsonl
 .Ed
+.Sh DIAGNOSTICS
+Common diagnostics include:
+.Bl -tag -width Ds
+.It Qq invalid TOML policy
+The policy file parsed as invalid TOML or used an unknown field.
+.It Qq process denied by policy
+The requested command matched
+.Va process.deny
+or did not match a non-empty
+.Va process.allow .
+.It Qq trace is empty
+.Cm trace show
+read a trace file with no events.
+.It Qq Landlock filesystem enforcement is only available on Linux
+The host selected the diagnostic no-op sandbox backend.
+.It Qq cannot enforce fs.deny
+Linux Landlock cannot express a deny carve-out below an already-granted path.
+Grant narrower read/write paths instead.
+.El
 .Sh SEE ALSO
-.Pa docs/policy.md ,
-.Pa docs/trace.md ,
-.Pa docs/roadmap.md
+.Xr nobody-trace 5 ,
+.Xr nobody.toml 5 ,
+.Xr nobody-policy 7 ,
+.Xr nobody-sandbox 7
