@@ -18,7 +18,7 @@ fn parent_dir_traversal_to_secret_is_denied() {
             "--",
             "sh",
             "-c",
-            r#"if cat ./src/../.env >/dev/null 2>&1; then exit 7; else echo denied-traversal; fi"#,
+            r#"if cat ./src/../.env; then exit 7; else echo denied-traversal; fi"#,
         ],
     );
 

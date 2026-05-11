@@ -23,7 +23,7 @@ fn symlink_to_secret_is_denied() {
             "--",
             "sh",
             "-c",
-            r#"if cat work/symlink-to-env >/dev/null 2>&1; then exit 7; else echo denied-symlink; fi"#,
+            r#"if cat work/symlink-to-env; then exit 7; else echo denied-symlink; fi"#,
         ],
     );
 

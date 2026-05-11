@@ -23,7 +23,7 @@ fn read_aws_credentials_is_denied() {
             "--",
             "sh",
             "-c",
-            r#"if cat ~/.aws/credentials >/dev/null 2>&1; then exit 7; else echo denied-aws; fi"#,
+            r#"if cat ~/.aws/credentials; then exit 7; else echo denied-aws; fi"#,
         ],
     );
 

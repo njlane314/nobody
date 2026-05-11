@@ -17,7 +17,7 @@ fn read_dotenv_is_denied() {
             "--",
             "sh",
             "-c",
-            r#"if cat .env >/dev/null 2>&1; then exit 7; else echo denied-dotenv; fi"#,
+            r#"if cat .env; then exit 7; else echo denied-dotenv; fi"#,
         ],
     );
 

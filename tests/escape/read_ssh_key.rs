@@ -20,7 +20,7 @@ fn read_ssh_key_is_denied() {
             "--",
             "sh",
             "-c",
-            r#"if cat ~/.ssh/id_rsa >/dev/null 2>&1; then exit 7; else echo denied-ssh; fi"#,
+            r#"if cat ~/.ssh/id_rsa; then exit 7; else echo denied-ssh; fi"#,
         ],
     );
 

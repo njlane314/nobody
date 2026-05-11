@@ -22,7 +22,7 @@ fn bash_child_read_is_denied() {
             "--",
             "bash",
             "-lc",
-            r#"if cat .env >/dev/null 2>&1; then exit 7; else echo denied-bash; fi"#,
+            r#"if cat .env; then exit 7; else echo denied-bash; fi"#,
         ],
     );
 

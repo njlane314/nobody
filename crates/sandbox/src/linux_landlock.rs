@@ -4,8 +4,8 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use landlock::{
-    ABI, Access, AccessFs, LandlockStatus, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, RulesetStatus,
+    ABI, Access, AccessFs, LandlockStatus, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+    path_beneath_rules,
 };
 use std::collections::BTreeSet;
 use std::io;
@@ -81,21 +81,15 @@ fn enforce_landlock(read_paths: &[PathBuf], write_paths: &[PathBuf]) -> Result<(
         .handle_access(AccessFs::from_all(abi))?
         .create()?;
 
-    for path in read_paths {
-        ruleset = ruleset.add_rule(PathBeneath::new(
-            PathFd::new(path)
-                .with_context(|| format!("failed to open read path {}", path.display()))?,
-            AccessFs::from_read(abi),
-        ))?;
-    }
+    ruleset = ruleset.add_rules(path_beneath_rules(
+        read_paths.iter().map(PathBuf::as_path),
+        AccessFs::from_read(abi),
+    ))?;
 
-    for path in write_paths {
-        ruleset = ruleset.add_rule(PathBeneath::new(
-            PathFd::new(path)
-                .with_context(|| format!("failed to open write path {}", path.display()))?,
-            AccessFs::from_all(abi),
-        ))?;
-    }
+    ruleset = ruleset.add_rules(path_beneath_rules(
+        write_paths.iter().map(PathBuf::as_path),
+        AccessFs::from_all(abi),
+    ))?;
 
     let status = ruleset.restrict_self()?;
 
