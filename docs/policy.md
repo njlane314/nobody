@@ -3,10 +3,10 @@
 `nobody` reads policy from `nobody.toml`.
 
 The current prototype parses agent, task, filesystem, network, process,
-environment, approval, and trace sections. Process policy and environment
-filtering are enforced today. Other capability sections describe the intended
-policy surface and are parsed so the file shape can stabilize before enforcement
-lands.
+environment, approval, and trace sections. Process policy, environment
+filtering, and Linux filesystem boundaries are enforced today. Network,
+approval, and tool sections describe the intended policy surface and are parsed
+so the file shape can stabilize before those enforcement backends land.
 
 ## Example
 
@@ -20,8 +20,8 @@ id = "fix-tests"
 repo = "."
 
 [fs]
-read = ["."]
-write = ["./src", "./tests"]
+read = ["./Cargo.toml", "./Cargo.lock", "./Makefile", "./README.md", "./crates", "./docs"]
+write = ["./Cargo.toml", "./Cargo.lock", "./README.md", "./crates", "./docs"]
 deny = [".env", "~/.ssh", "~/.aws"]
 
 [net]
@@ -78,13 +78,22 @@ Commands match either the exact program string or its basename. For example,
 ## Filesystem
 
 Filesystem policy is parsed and evaluated by the policy crate. It is not yet
-enforced by the runtime.
+enforced on every platform. On Linux, the runtime installs a Landlock boundary
+before the child process starts and requires fully enforced ABI v3 filesystem
+rights. On non-Linux hosts, filesystem policy remains diagnostic and the
+runtime prints a warning before spawning the command.
 
 Filesystem simulation normalizes paths lexically before matching rules. For
 example, `./src/../.env` is evaluated as `.env`. It also compares `~/...`
 patterns against the current `HOME` path, so `~/.ssh` still matches after a
 shell expands it to an absolute path. Explicit `fs.deny` rules win over read
 and write grants.
+
+Landlock is additive: it grants access to allowed path trees but cannot express
+an explicit deny beneath an already-granted tree. A policy such as `read = ["."]`
+with `deny = [".env"]` is useful for simulation, but `nobody run` fails closed
+on Linux instead of pretending that carve-out is enforceable. Grant narrower
+paths when you need real filesystem enforcement.
 
 ```sh
 nobody policy simulate nobody.toml -- fs.read .env
@@ -95,7 +104,7 @@ DENY fs.read .env
 rule: fs.deny
 matched: .env
 reason: path is explicitly denied
-note: filesystem decisions are diagnostics only; OS filesystem enforcement is not active yet
+note: filesystem decisions are diagnostic; run enforcement depends on the active sandbox backend
 ```
 
 ## Environment

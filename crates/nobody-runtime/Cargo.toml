@@ -7,5 +7,6 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 nobody-policy = { path = "../nobody-policy" }
+nobody-sandbox = { path = "../nobody-sandbox" }
 nobody-trace = { path = "../nobody-trace" }
 serde_json.workspace = true

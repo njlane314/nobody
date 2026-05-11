@@ -19,6 +19,10 @@ Filesystem and Network
 Filesystem policy declares readable, writable, and denied paths.  Network
 policy declares the default mode and endpoint allow/deny lists.
 
+Linux filesystem enforcement is based on grantable path trees.  Deny entries
+are useful for policy explanation, but a denied path beneath an allowed parent
+cannot be represented by Landlock and must fail closed at runtime.
+
 =======================
 Process and Environment
 =======================

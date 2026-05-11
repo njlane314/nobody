@@ -225,7 +225,7 @@ fn print_decision(decision: &Decision) {
 
     if matches!(reason.resource, Resource::File { .. }) {
         println!(
-            "note: filesystem decisions are diagnostics only; OS filesystem enforcement is not active yet"
+            "note: filesystem decisions are diagnostic; run enforcement depends on the active sandbox backend"
         );
     }
 }

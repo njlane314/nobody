@@ -32,6 +32,9 @@ before the runtime spawns a process.
 `env.filtered` records the number and names of allowed and denied inherited
 environment variables. It does not record values.
 
+`sandbox.prepared` records the selected sandbox backend and whether filesystem
+enforcement is active for the run.
+
 `process.started` and `process.exited` record process lifecycle details.
 
 `run.completed` records the final exit status.
@@ -53,5 +56,6 @@ selected events as newline-delimited JSON.
 The trace is append-only by convention in the current prototype. It is not yet
 sealed, signed, replayable, or protected against local modification.
 
-The trace schema is designed for filesystem, network, approval, and MCP events,
-but those enforcement points have not landed yet.
+The trace schema is designed for more detailed filesystem, network, approval,
+and MCP events. The current runtime records sandbox preparation but does not yet
+record every file access attempted inside the child process.

@@ -9,7 +9,8 @@ valid, and records the resulting events as trace evidence.
 
 The current prototype is intentionally small.  It parses typed policy from
 ``nobody.toml``, evaluates process and environment rules, filters inherited
-environment variables, runs allowed commands, and writes JSONL trace events.
+environment variables, applies Linux Landlock filesystem boundaries when
+available, runs allowed commands, and writes JSONL trace events.
 
 =========================
 Ambient Authority Problem
@@ -42,8 +43,10 @@ Current Prototype
 
 The current repository enforces process allow/deny decisions before spawn and
 filters inherited environment variables before the child process starts.
-Filesystem, network, MCP, browser, secret, and approval boundaries are parsed
-as design-facing policy sections but are not yet enforced by the runtime.
+On Linux it also enforces filesystem read/write grants through Landlock when the
+policy does not require deny carve-outs beneath granted paths.  Network, MCP,
+browser, secret, and approval boundaries are parsed as design-facing policy
+sections but are not yet enforced by the runtime.
 
 ==============================
 Guide to Reading This Document

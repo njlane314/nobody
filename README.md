@@ -9,9 +9,9 @@ nobody is a least-privilege execution runtime for AI agents.
 
 nobody is designed to run autonomous software as a process with declared
 capabilities instead of inherited authority. The current runtime enforces
-process and environment policy, records structured trace evidence, and exposes
-filesystem/network decisions as policy diagnostics before those enforcement
-backends land.
+process and environment policy, applies Linux Landlock filesystem boundaries
+when available, records structured trace evidence, and exposes network
+decisions as policy diagnostics before that enforcement backend lands.
 
 Agents should run as nobody.
 
@@ -59,6 +59,8 @@ Currently enforced:
 
 - process allow/deny before a command is spawned
 - environment filtering by allow/deny patterns
+- Linux filesystem read/write boundaries through Landlock when the policy can
+  be represented without deny carve-outs under granted paths
 
 Currently recorded:
 
@@ -66,15 +68,16 @@ Currently recorded:
 - policy load
 - process decision, start, and exit
 - environment filtering summary without variable values
+- sandbox backend and enforcement status
 - filesystem and network policy simulation
 
 Not enforced yet:
 
-- filesystem read/write boundaries
+- filesystem read/write boundaries on non-Linux hosts
 - network egress
 - MCP tool calls
 - browser sessions
-- Landlock, seccomp, namespaces, or macOS sandboxing
+- seccomp, namespaces, or macOS sandboxing
 
 ## Documentation
 

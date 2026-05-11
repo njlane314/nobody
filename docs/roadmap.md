@@ -49,23 +49,27 @@ nobody runner register
 
 ## Next implementation steps
 
-1. Add a Linux-only sandbox crate interface.
-2. Add Landlock filesystem enforcement.
-3. Add escape tests for denied `.env`, SSH keys, symlink traversal, and child-process file access.
+1. Validate the Linux Landlock backend in CI and document the ABI v3 kernel requirement.
+2. Add policy profiles for common coding-agent workflows.
+3. Expand escape tests for denied files, symlinks, descendants, and package scripts.
 4. Add network namespace/proxy enforcement.
 5. Add MCP proxying.
 
 ## Current guarantees
 
 `nobody` currently enforces process allow/deny checks before spawning a command
-and filters environment variables before the child process starts.
+and filters environment variables before the child process starts. On Linux, it
+also installs a Landlock filesystem boundary for policies that can be expressed
+as granted read/write paths.
 
 `nobody` currently records structured trace events for run lifecycle, process
-decisions, and environment filtering.
+decisions, environment filtering, and sandbox backend status.
 
 `nobody` currently simulates filesystem and network policy decisions for
-diagnostics. These decisions explain what policy says; they are not operating
-system enforcement yet.
+diagnostics. Filesystem simulation may express deny carve-outs that Landlock
+cannot enforce under an already-granted path, so the Linux runtime fails closed
+for those policies. Network decisions explain what policy says; they are not
+operating system enforcement yet.
 
-`nobody` does not yet enforce filesystem, network, MCP, browser, or cross-OS
-sandbox boundaries.
+`nobody` does not yet enforce network, MCP, browser, or cross-OS sandbox
+boundaries.

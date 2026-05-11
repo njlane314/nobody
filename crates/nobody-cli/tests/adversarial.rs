@@ -29,8 +29,8 @@ impl TestDir {
             self.path.join("nobody.toml"),
             r#"
 [fs]
-read = ["."]
-write = ["./src", "./tests"]
+read = []
+write = []
 deny = [".env", "~/.ssh", "~/.aws"]
 
 [net]
@@ -57,6 +57,43 @@ redact = ["*TOKEN*", "*KEY*", "Authorization"]
 
     fn trace(&self) -> String {
         fs::read_to_string(self.path.join(".nobody/runs/latest.jsonl")).unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn write_policy_with_fs(&self, read: &[&str], write: &[&str], deny: &[&str]) {
+        fs::write(
+            self.path.join("nobody.toml"),
+            format!(
+                r#"
+[fs]
+read = [{}]
+write = [{}]
+deny = [{}]
+
+[net]
+mode = "deny-by-default"
+allow = []
+deny = []
+
+[process]
+allow = ["sh"]
+deny = []
+
+[env]
+clear = true
+allow = ["PATH", "HOME", "USER"]
+deny = ["*TOKEN*", "*KEY*", "AWS_*", "SSH_AUTH_SOCK"]
+
+[trace]
+path = ".nobody/runs/latest.jsonl"
+redact = ["*TOKEN*", "*KEY*", "Authorization"]
+"#,
+                quoted(read),
+                quoted(write),
+                quoted(deny)
+            ),
+        )
+        .unwrap();
     }
 }
 
@@ -91,6 +128,15 @@ fn trace_events(raw: &str) -> Vec<Value> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn quoted(values: &[&str]) -> String {
+    values
+        .iter()
+        .map(|value| format!("{value:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[test]
@@ -135,6 +181,24 @@ fn allowed_process_records_allow_trace_event() {
     assert!(trace.contains("process.exec.allow"));
     assert!(trace.contains(r#""decision":"allow""#));
     assert!(trace.contains("process.started"));
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn non_linux_run_warns_that_filesystem_sandbox_is_noop() {
+    let dir = TestDir::new("noop-warning");
+    dir.write_policy();
+
+    let output = run_in(
+        dir.path(),
+        &["run", "--policy", "nobody.toml", "--", "echo", "hello"],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("WARNING"));
+    assert!(stderr(&output).contains("filesystem policy is diagnostic only"));
+    assert!(dir.trace().contains("sandbox.prepared"));
+    assert!(dir.trace().contains(r#""enforced":false"#));
 }
 
 #[test]
@@ -211,10 +275,7 @@ fn filesystem_denials_are_simulated_with_diagnostics() {
         let out = stdout(&output);
         assert!(out.contains("DENY fs.read"), "{out}");
         assert!(out.contains("rule: fs.deny"), "{out}");
-        assert!(
-            out.contains("filesystem decisions are diagnostics only"),
-            "{out}"
-        );
+        assert!(out.contains("filesystem decisions are diagnostic"), "{out}");
     }
 }
 
@@ -290,4 +351,133 @@ fn trace_show_latest_jsonl_returns_only_latest_run() {
     );
     assert!(raw.contains("second"));
     assert!(!raw.contains("first"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_denies_dotenv_read() {
+    let dir = TestDir::new("landlock-dotenv");
+    dir.write_policy_with_fs(&[], &[], &[".env"]);
+    fs::write(dir.path().join(".env"), "secret").unwrap();
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "run",
+            "--policy",
+            "nobody.toml",
+            "--",
+            "sh",
+            "-c",
+            r#"if IFS= read -r _ < .env; then exit 7; else echo denied; fi"#,
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("denied"));
+    assert!(dir.trace().contains(r#""backend":"landlock""#));
+    assert!(dir.trace().contains(r#""enforced":true"#));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_denies_ssh_key_read() {
+    let dir = TestDir::new("landlock-ssh");
+    let home = dir.path().join("home");
+    fs::create_dir_all(home.join(".ssh")).unwrap();
+    fs::write(home.join(".ssh/id_rsa"), "secret").unwrap();
+    dir.write_policy_with_fs(&[], &[], &["~/.ssh"]);
+
+    let output = Command::new(nobody())
+        .current_dir(dir.path())
+        .env("HOME", &home)
+        .args([
+            "run",
+            "--policy",
+            "nobody.toml",
+            "--",
+            "sh",
+            "-c",
+            r#"if IFS= read -r _ < ~/.ssh/id_rsa; then exit 7; else echo denied; fi"#,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("denied"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_denies_parent_write_escape() {
+    let dir = TestDir::new("landlock-write");
+    fs::create_dir_all(dir.path().join("work")).unwrap();
+    dir.write_policy_with_fs(&[], &["./work"], &[]);
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "run",
+            "--policy",
+            "nobody.toml",
+            "--",
+            "sh",
+            "-c",
+            r#"if echo x > ../outside.txt; then exit 7; else echo denied; fi"#,
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("denied"));
+    assert!(!dir.path().parent().unwrap().join("outside.txt").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_denies_symlink_escape() {
+    let dir = TestDir::new("landlock-symlink");
+    let outside = TestDir::new("landlock-secret");
+    fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("secret.txt"), dir.path().join("link")).unwrap();
+    dir.write_policy_with_fs(&["."], &[], &[]);
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "run",
+            "--policy",
+            "nobody.toml",
+            "--",
+            "sh",
+            "-c",
+            r#"if IFS= read -r _ < link; then exit 7; else echo denied; fi"#,
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("denied"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_child_process_remains_constrained() {
+    let dir = TestDir::new("landlock-child");
+    fs::write(dir.path().join(".env"), "secret").unwrap();
+    dir.write_policy_with_fs(&[], &[], &[".env"]);
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "run",
+            "--policy",
+            "nobody.toml",
+            "--",
+            "sh",
+            "-c",
+            r#"sh -c 'if IFS= read -r _ < .env; then exit 7; else echo child-denied; fi'"#,
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("child-denied"));
 }

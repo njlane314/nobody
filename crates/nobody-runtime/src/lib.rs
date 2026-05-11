@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use nobody_policy::{Action, Decision, Policy};
+use nobody_sandbox::{Sandbox, SandboxSpec, platform_default_sandbox};
 use nobody_trace::{DecisionSummary, TraceWriter};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -9,6 +10,7 @@ use std::process::Command;
 pub struct Runtime {
     policy: Policy,
     trace: TraceWriter,
+    sandbox: Box<dyn Sandbox>,
 }
 
 pub struct RunSpec {
@@ -30,9 +32,18 @@ struct PreparedEnv {
 
 impl Runtime {
     pub fn new(policy: Policy, trace_path: PathBuf) -> Result<Self> {
+        Self::with_sandbox(policy, trace_path, platform_default_sandbox())
+    }
+
+    pub fn with_sandbox(
+        policy: Policy,
+        trace_path: PathBuf,
+        sandbox: Box<dyn Sandbox>,
+    ) -> Result<Self> {
         Ok(Self {
             policy,
             trace: TraceWriter::open(&trace_path)?,
+            sandbox,
         })
     }
 
@@ -105,8 +116,31 @@ impl Runtime {
             }
         }
 
-        let mut child = command
-            .spawn()
+        let sandbox_spec = SandboxSpec::from_policy_paths(
+            std::env::current_dir().context("failed to resolve current directory")?,
+            &self.policy.fs.read,
+            &self.policy.fs.write,
+            &self.policy.fs.deny,
+        );
+        let prepared_sandbox = self.sandbox.prepare(&sandbox_spec)?;
+        let sandbox_status = prepared_sandbox.status();
+
+        if let Some(warning) = &sandbox_status.warning {
+            eprintln!("nobody: WARNING: {warning}");
+        }
+
+        self.trace.event(
+            "sandbox.prepared",
+            None,
+            json!({
+                "backend": sandbox_status.backend,
+                "enforced": sandbox_status.enforced,
+                "warning": sandbox_status.warning,
+            }),
+        )?;
+
+        let mut child = prepared_sandbox
+            .spawn(&mut command)
             .with_context(|| format!("failed to start command: {program}"))?;
 
         self.trace.event(

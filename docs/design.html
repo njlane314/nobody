@@ -50,7 +50,8 @@ available enforcement mechanisms, starts the subject only when the boundary is
 valid, and records the resulting events as trace evidence.</p>
 <p>The current prototype is intentionally small.  It parses typed policy from
 <code class="docutils literal notranslate"><span class="pre">nobody.toml</span></code>, evaluates process and environment rules, filters inherited
-environment variables, runs allowed commands, and writes JSONL trace events.</p>
+environment variables, applies Linux Landlock filesystem boundaries when
+available, runs allowed commands, and writes JSONL trace events.</p>
 <section id="ambient-authority-problem">
 <h3><span class="section-number">1.1. </span>Ambient Authority Problem<a class="headerlink" href="#ambient-authority-problem" title="Link to this heading">¶</a></h3>
 <p>A developer shell commonly has broad access to source trees, credentials,
@@ -76,8 +77,10 @@ do in the first place.</p>
 <h3><span class="section-number">1.3. </span>Current Prototype<a class="headerlink" href="#current-prototype" title="Link to this heading">¶</a></h3>
 <p>The current repository enforces process allow/deny decisions before spawn and
 filters inherited environment variables before the child process starts.
-Filesystem, network, MCP, browser, secret, and approval boundaries are parsed
-as design-facing policy sections but are not yet enforced by the runtime.</p>
+On Linux it also enforces filesystem read/write grants through Landlock when the
+policy does not require deny carve-outs beneath granted paths.  Network, MCP,
+browser, secret, and approval boundaries are parsed as design-facing policy
+sections but are not yet enforced by the runtime.</p>
 </section>
 <section id="guide-to-reading-this-document">
 <h3><span class="section-number">1.4. </span>Guide to Reading This Document<a class="headerlink" href="#guide-to-reading-this-document" title="Link to this heading">¶</a></h3>
@@ -196,6 +199,8 @@ trace readers should not depend on the command-line interface.</p>
 </dd>
 <dt><code class="docutils literal notranslate"><span class="pre">nobody-runtime</span></code></dt><dd><p>Run lifecycle, process supervision, and environment filtering.</p>
 </dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nobody-sandbox</span></code></dt><dd><p>Platform sandbox interfaces plus noop and Linux Landlock backends.</p>
+</dd>
 <dt><code class="docutils literal notranslate"><span class="pre">nobody-trace</span></code></dt><dd><p>Trace event schema, JSONL writing, and compact trace display.</p>
 </dd>
 </dl>
@@ -212,8 +217,9 @@ authority granted to the subject.</p>
 <section id="policy-parsing-and-validation">
 <h3><span class="section-number">4.3. </span>Policy Parsing and Validation<a class="headerlink" href="#policy-parsing-and-validation" title="Link to this heading">¶</a></h3>
 <p>The parser accepts agent, task, filesystem, network, process, environment,
-approval, and trace sections.  The prototype enforces process and environment
-sections first while preserving the larger file shape for future enforcement.</p>
+approval, and trace sections.  The prototype enforces process, environment, and
+Linux filesystem sections first while preserving the larger file shape for
+future enforcement.</p>
 </section>
 <section id="runtime-supervision">
 <h3><span class="section-number">4.4. </span>Runtime Supervision<a class="headerlink" href="#runtime-supervision" title="Link to this heading">¶</a></h3>
@@ -233,9 +239,14 @@ denial is recorded in the trace.</p>
 </section>
 <section id="filesystem-enforcement">
 <h3><span class="section-number">4.7. </span>Filesystem Enforcement<a class="headerlink" href="#filesystem-enforcement" title="Link to this heading">¶</a></h3>
-<p>Filesystem enforcement is planned around Linux Landlock, mount namespaces,
-overlay directories, and path-matching policy.  The prototype does not yet block
-filesystem access.</p>
+<p>The first filesystem backend uses Linux Landlock.  The runtime prepares a
+sandbox specification from <code class="docutils literal notranslate"><span class="pre">fs.read</span></code>, <code class="docutils literal notranslate"><span class="pre">fs.write</span></code>, and <code class="docutils literal notranslate"><span class="pre">fs.deny</span></code> and
+installs fully enforced ABI v3 filesystem rules in the child process after fork
+and before exec.  Non-Linux hosts use a noop backend and emit a warning.</p>
+<p>Landlock grants access to path trees; it cannot subtract a denied child from an
+already-granted parent.  The runtime therefore fails closed for policies such as
+<code class="docutils literal notranslate"><span class="pre">read</span> <span class="pre">=</span> <span class="pre">[&quot;.&quot;]</span></code> with <code class="docutils literal notranslate"><span class="pre">deny</span> <span class="pre">=</span> <span class="pre">[&quot;.env&quot;]</span></code> on Linux instead of silently
+overstating enforcement.</p>
 </section>
 <section id="network-enforcement">
 <h3><span class="section-number">4.8. </span>Network Enforcement<a class="headerlink" href="#network-enforcement" title="Link to this heading">¶</a></h3>
@@ -317,6 +328,9 @@ context, such as a repository or task identifier.</p>
 <h3><span class="section-number">2.2. </span>Filesystem and Network<a class="headerlink" href="#filesystem-and-network" title="Link to this heading">¶</a></h3>
 <p>Filesystem policy declares readable, writable, and denied paths.  Network
 policy declares the default mode and endpoint allow/deny lists.</p>
+<p>Linux filesystem enforcement is based on grantable path trees.  Deny entries
+are useful for policy explanation, but a denied path beneath an allowed parent
+cannot be represented by Landlock and must fail closed at runtime.</p>
 </section>
 <section id="process-and-environment">
 <h3><span class="section-number">2.3. </span>Process and Environment<a class="headerlink" href="#process-and-environment" title="Link to this heading">¶</a></h3>
@@ -371,6 +385,7 @@ stable.</p>
 <li><p>introduce a Linux sandbox crate interface,</p></li>
 <li><p>enforce Landlock filesystem policy,</p></li>
 <li><p>add escape tests for denied files and descendants,</p></li>
+<li><p>validate Landlock in Linux CI,</p></li>
 <li><p>add deny-default network mediation,</p></li>
 <li><p>add MCP proxying,</p></li>
 <li><p>add secret brokering, and</p></li>

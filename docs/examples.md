@@ -43,4 +43,6 @@ cargo run -- policy simulate nobody.toml -- fs.read .env
 ```
 
 Filesystem simulation is diagnostic only in this prototype. It explains the
-policy decision; it does not install an operating-system filesystem boundary.
+policy decision. `nobody run` installs a Landlock filesystem boundary on Linux
+when the policy can be represented by allowlisted paths; on non-Linux hosts it
+prints a warning and records that filesystem enforcement is inactive.

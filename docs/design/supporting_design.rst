@@ -21,6 +21,9 @@ The current workspace is split into focused crates:
 ``nobody-runtime``
    Run lifecycle, process supervision, and environment filtering.
 
+``nobody-sandbox``
+   Platform sandbox interfaces plus noop and Linux Landlock backends.
+
 ``nobody-trace``
    Trace event schema, JSONL writing, and compact trace display.
 
@@ -42,8 +45,9 @@ Policy Parsing and Validation
 =============================
 
 The parser accepts agent, task, filesystem, network, process, environment,
-approval, and trace sections.  The prototype enforces process and environment
-sections first while preserving the larger file shape for future enforcement.
+approval, and trace sections.  The prototype enforces process, environment, and
+Linux filesystem sections first while preserving the larger file shape for
+future enforcement.
 
 ===================
 Runtime Supervision
@@ -71,9 +75,15 @@ denial is recorded in the trace.
 Filesystem Enforcement
 ======================
 
-Filesystem enforcement is planned around Linux Landlock, mount namespaces,
-overlay directories, and path-matching policy.  The prototype does not yet block
-filesystem access.
+The first filesystem backend uses Linux Landlock.  The runtime prepares a
+sandbox specification from ``fs.read``, ``fs.write``, and ``fs.deny`` and
+installs fully enforced ABI v3 filesystem rules in the child process after fork
+and before exec.  Non-Linux hosts use a noop backend and emit a warning.
+
+Landlock grants access to path trees; it cannot subtract a denied child from an
+already-granted parent.  The runtime therefore fails closed for policies such as
+``read = ["."]`` with ``deny = [".env"]`` on Linux instead of silently
+overstating enforcement.
 
 ===================
 Network Enforcement

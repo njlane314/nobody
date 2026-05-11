@@ -3,6 +3,7 @@ members = [
     "crates/nobody-cli",
     "crates/nobody-policy",
     "crates/nobody-runtime",
+    "crates/nobody-sandbox",
     "crates/nobody-trace",
 ]
 default-members = ["crates/nobody-cli"]

@@ -10,7 +10,8 @@ The implementation should move from semantics to enforcement:
 4. introduce a Linux sandbox crate interface,
 5. enforce Landlock filesystem policy,
 6. add escape tests for denied files and descendants,
-7. add deny-default network mediation,
-8. add MCP proxying,
-9. add secret brokering, and
-10. add replay and diff views.
+7. validate Landlock in Linux CI,
+8. add deny-default network mediation,
+9. add MCP proxying,
+10. add secret brokering, and
+11. add replay and diff views.

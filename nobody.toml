@@ -1,6 +1,6 @@
 [fs]
-read = ["./"]
-write = ["./src", "./tests"]
+read = ["./Cargo.toml", "./Cargo.lock", "./Makefile", "./README.md", "./crates", "./docs", "./man"]
+write = ["./Cargo.toml", "./Cargo.lock", "./README.md", "./crates", "./docs", "./man"]
 deny = [".env", "~/.ssh", "~/.aws"]
 
 [net]
