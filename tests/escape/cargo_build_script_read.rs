@@ -6,6 +6,7 @@ use super::common::*;
 fn cargo_build_script_read_is_denied() {
     let dir = EscapeDir::new("cargo-build-script-read");
     mkdir(dir.path().join("crate/src"));
+    mkdir(dir.path().join("crate/target/tmp"));
     write(dir.path().join(".env"), "SECRET=1\n");
     write(
         dir.path().join("crate/Cargo.toml"),
@@ -22,7 +23,7 @@ build = "build.rs"
         r#"fn main() {
     match std::fs::read_to_string("../.env") {
         Ok(_) => std::process::exit(7),
-        Err(_) => println!("cargo:warning=denied-cargo-build-script"),
+        Err(_) => std::fs::write("target/denied-cargo-build-script", "ok").unwrap(),
     }
 }
 "#,
@@ -41,8 +42,10 @@ build = "build.rs"
 
     dir.write_policy(&read, &["./crate"], &[".env"], &["cargo"]);
 
-    let output = run_nobody(
+    let tmpdir = dir.path().join("crate/target/tmp");
+    let output = run_nobody_with_env(
         dir.path(),
+        &[("TMPDIR", tmpdir.as_path())],
         &[
             "run",
             "--policy",
@@ -56,5 +59,19 @@ build = "build.rs"
         ],
     );
 
-    assert_denied(&output, "denied-cargo-build-script");
+    assert!(
+        output.status.success(),
+        "status: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        stdout(&output),
+        stderr(&output)
+    );
+    assert!(
+        dir.path()
+            .join("crate/target/denied-cargo-build-script")
+            .exists(),
+        "build script did not record denied read\nstdout:\n{}\nstderr:\n{}",
+        stdout(&output),
+        stderr(&output)
+    );
 }

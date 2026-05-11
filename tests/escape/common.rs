@@ -55,7 +55,7 @@ deny = []
 
 [env]
 clear = true
-allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL", "CARGO_HOME", "RUSTUP_HOME"]
+allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL", "CARGO_HOME", "RUSTUP_HOME", "TMPDIR"]
 deny = ["*TOKEN*", "*KEY*", "AWS_*", "DATABASE_URL", "KUBECONFIG", "DOCKER_CONFIG", "SSH_AUTH_SOCK"]
 
 [trace]
@@ -101,6 +101,15 @@ pub fn run_nobody_with_home(dir: &Path, home: &Path, args: &[&str]) -> Output {
         .args(args)
         .output()
         .unwrap()
+}
+
+pub fn run_nobody_with_env(dir: &Path, envs: &[(&str, &Path)], args: &[&str]) -> Output {
+    let mut command = Command::new(nobody());
+    command.current_dir(dir);
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    command.args(args).output().unwrap()
 }
 
 pub fn stdout(output: &Output) -> String {
