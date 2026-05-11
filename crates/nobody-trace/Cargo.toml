@@ -1,0 +1,11 @@
+[package]
+name = "nobody-trace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+nobody-policy = { path = "../nobody-policy" }
+serde.workspace = true
+serde_json.workspace = true

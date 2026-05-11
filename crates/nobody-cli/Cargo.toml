@@ -1,0 +1,19 @@
+[package]
+name = "nobody-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nobody"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+nobody-policy = { path = "../nobody-policy" }
+nobody-runtime = { path = "../nobody-runtime" }
+nobody-trace = { path = "../nobody-trace" }
+
+[dev-dependencies]
+serde_json.workspace = true

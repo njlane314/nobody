@@ -151,14 +151,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "nobody"
+name = "nobody-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "nobody-policy",
+ "nobody-runtime",
+ "nobody-trace",
+ "serde_json",
+]
+
+[[package]]
+name = "nobody-policy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "nobody-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nobody-policy",
+ "nobody-trace",
+ "serde_json",
+]
+
+[[package]]
+name = "nobody-trace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nobody-policy",
  "serde",
  "serde_json",
- "toml",
 ]
 
 [[package]]

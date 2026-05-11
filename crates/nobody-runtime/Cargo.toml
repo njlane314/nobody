@@ -1,0 +1,11 @@
+[package]
+name = "nobody-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+nobody-policy = { path = "../nobody-policy" }
+nobody-trace = { path = "../nobody-trace" }
+serde_json.workspace = true

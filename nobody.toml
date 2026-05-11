@@ -4,12 +4,19 @@ write = ["./src", "./tests"]
 deny = [".env", "~/.ssh", "~/.aws"]
 
 [net]
+mode = "deny-by-default"
 allow = ["github.com", "api.anthropic.com"]
-deny = ["*"]
+deny = []
 
-[shell]
+[process]
 allow = ["echo", "git", "cargo", "rustc"]
 deny = ["rm", "curl", "scp", "ssh"]
 
+[env]
+clear = true
+allow = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "SHELL"]
+deny = ["*TOKEN*", "*KEY*", "AWS_*", "DATABASE_URL", "SSH_AUTH_SOCK"]
+
 [trace]
 path = ".nobody/runs/latest.jsonl"
+redact = ["*TOKEN*", "*KEY*", "Authorization"]

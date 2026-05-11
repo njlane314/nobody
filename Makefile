@@ -9,18 +9,18 @@ DESTDIR ?=
 all: build
 
 build:
-	$(CARGO) build
+	$(CARGO) build --workspace
 
 test:
-	$(CARGO) test
+	$(CARGO) test --workspace
 
 check: test
 
 run:
-	$(CARGO) run -- run -- echo hello
+	$(CARGO) run --package nobody-cli -- run -- echo hello
 
 install:
-	$(CARGO) install --path . --root "$(DESTDIR)$(PREFIX)"
+	$(CARGO) install --path crates/nobody-cli --root "$(DESTDIR)$(PREFIX)"
 
 clean:
 	$(CARGO) clean

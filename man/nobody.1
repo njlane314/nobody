@@ -11,11 +11,23 @@
 .Fl -
 .Ar command
 .Op Ar argument ...
+.Nm
+.Cm policy simulate
+.Ar policy
+.Fl -
+.Ar action
+.Op Ar argument ...
+.Nm
+.Cm trace show
+.Op Ar latest | file
+.Op Fl -jsonl
 .Sh DESCRIPTION
 .Nm
 is a least-privilege execution runtime for AI agents.
-The current prototype reads a TOML policy, checks shell command allow and deny
-lists, runs the permitted command, and appends JSONL trace events.
+The current prototype reads a TOML policy, evaluates process and environment
+capability decisions, runs the permitted command with a filtered environment,
+appends structured JSONL trace events, and simulates filesystem decisions for
+diagnostics.
 .Pp
 It is not yet a security sandbox.
 Filesystem, network, MCP, and browser-control enforcement are planned but are
@@ -39,6 +51,11 @@ Default trace file.
 .Bd -literal
 nobody run -- echo hello
 nobody run --policy nobody.toml -- echo hello
+nobody policy check nobody.toml
+nobody policy simulate nobody.toml -- fs.read .env
+nobody policy simulate nobody.toml -- process.exec curl
+nobody trace show latest
+nobody trace show latest --jsonl
 .Ed
 .Sh SEE ALSO
 .Pa docs/policy.md ,

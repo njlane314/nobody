@@ -7,11 +7,11 @@ Run agents without ambient authority.
 
 nobody is a least-privilege execution runtime for AI agents.
 
-nobody runs autonomous software as a process with declared capabilities instead
-of inherited authority. Agents, tools, MCP servers, and shell commands run
-inside explicit capability boundaries: filesystem, network, process, secrets,
-and tool access are granted by policy, enforced at runtime, and recorded as a
-replayable trace.
+nobody is designed to run autonomous software as a process with declared
+capabilities instead of inherited authority. The current runtime enforces
+process and environment policy, records structured trace evidence, and exposes
+filesystem/network decisions as policy diagnostics before those enforcement
+backends land.
 
 Agents should run as nobody.
 
@@ -26,7 +26,8 @@ make check
 
 ```sh
 cargo run -- run -- echo hello
-cat .nobody/runs/latest.jsonl
+cargo run -- policy simulate nobody.toml -- fs.read .env
+cargo run -- trace show latest
 ```
 
 ```text
@@ -37,7 +38,7 @@ agent / coding tool / MCP client
         |
         +--> filesystem capabilities
         +--> network capabilities
-        +--> shell/process capabilities
+        +--> process capabilities
         +--> MCP/tool capabilities
         +--> secrets capabilities
         +--> approval gates
@@ -50,11 +51,30 @@ agent / coding tool / MCP client
 ## Current prototype
 
 This repo currently provides the first product surface only: it reads
-`nobody.toml`, parses a simple capability policy, gates shell commands by an
-allow/deny list, runs the allowed command, and appends JSONL trace events.
+`nobody.toml`, parses a typed capability policy, evaluates process and
+environment decisions, runs the allowed command, filters inherited environment
+variables, and appends structured JSONL trace events.
 
-It is not a security sandbox yet. There is no Landlock, seccomp, namespace,
-network, MCP, or browser-control enforcement in this milestone.
+Currently enforced:
+
+- process allow/deny before a command is spawned
+- environment filtering by allow/deny patterns
+
+Currently recorded:
+
+- run creation and completion
+- policy load
+- process decision, start, and exit
+- environment filtering summary without variable values
+- filesystem and network policy simulation
+
+Not enforced yet:
+
+- filesystem read/write boundaries
+- network egress
+- MCP tool calls
+- browser sessions
+- Landlock, seccomp, namespaces, or macOS sandboxing
 
 ## Documentation
 
