@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -14,6 +15,7 @@ pub struct Policy {
     pub process: ProcessPolicy,
     pub env: EnvPolicy,
     pub approval: ApprovalPolicy,
+    pub mcp: McpPolicy,
     pub trace: TracePolicy,
 }
 
@@ -92,6 +94,37 @@ pub struct ApprovalPolicy {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct McpPolicy {
+    #[serde(flatten)]
+    pub servers: BTreeMap<String, McpServerPolicy>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpServerPolicy {
+    pub allow_tools: Vec<String>,
+    pub deny_tools: Vec<String>,
+    pub rule: Vec<McpToolRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpToolRule {
+    pub tool: String,
+    #[serde(default)]
+    pub decision: Option<McpRuleDecision>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpRuleDecision {
+    Allow,
+    Deny,
+    Ask,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TracePolicy {
     pub path: Option<PathBuf>,
@@ -106,6 +139,7 @@ pub enum Action {
     WriteFile { path: PathBuf },
     ConnectNetwork { host: String, port: u16 },
     ReadEnv { name: String },
+    CallMcpTool { server: String, tool: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -116,6 +150,7 @@ pub enum ActionKind {
     FsWrite,
     NetConnect,
     EnvRead,
+    McpToolCall,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -125,6 +160,7 @@ pub enum Resource {
     File { path: PathBuf },
     Network { host: String, port: u16 },
     Env { name: String },
+    McpTool { server: String, tool: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -147,6 +183,18 @@ pub struct DecisionReason {
     pub action: ActionKind,
     pub matched_pattern: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyDiagnostic {
+    pub level: DiagnosticLevel,
+    pub code: &'static str,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticLevel {
+    Warning,
 }
 
 pub struct PolicyEvaluator<'a> {
@@ -181,6 +229,71 @@ impl Policy {
     pub fn evaluator(&self) -> PolicyEvaluator<'_> {
         PolicyEvaluator { policy: self }
     }
+
+    pub fn diagnostics(&self) -> Vec<PolicyDiagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for program in &self.process.allow {
+            if risky_legacy_process_name(program)
+                && !self
+                    .process
+                    .rule
+                    .iter()
+                    .any(|rule| program_names_match(&rule.program, program))
+            {
+                diagnostics.push(PolicyDiagnostic {
+                    level: DiagnosticLevel::Warning,
+                    code: "process.risky_legacy_allow",
+                    message: format!(
+                        "process.allow includes {program:?} without a matching [[process.rule]]"
+                    ),
+                });
+            }
+        }
+
+        for deny in &self.fs.deny {
+            let deny_path = normalize_path(Path::new(deny));
+            for (grant_kind, grants) in [
+                ("fs.read", self.fs.read.as_slice()),
+                ("fs.write", self.fs.write.as_slice()),
+            ] {
+                for grant in grants {
+                    if path_matches(grant, &deny_path) {
+                        diagnostics.push(PolicyDiagnostic {
+                            level: DiagnosticLevel::Warning,
+                            code: "fs.landlock_deny_carveout",
+                            message: format!(
+                                "Linux Landlock cannot enforce deny path {deny:?} under {grant_kind} grant {grant:?}"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        let deny_all = self.net.deny.iter().any(|pattern| pattern == "*");
+        if self.net.mode.as_deref() == Some("deny-by-default") && !deny_all {
+            let message = if self.net.allow.is_empty() {
+                "network deny-by-default policy is diagnostic unless deny = [\"*\"] requests deny-all egress".into()
+            } else {
+                "network host allowlists are diagnostic; Linux runtime currently enforces only deny-all egress".into()
+            };
+            diagnostics.push(PolicyDiagnostic {
+                level: DiagnosticLevel::Warning,
+                code: "net.egress_diagnostic",
+                message,
+            });
+        }
+        if !self.net.deny.is_empty() && !deny_all {
+            diagnostics.push(PolicyDiagnostic {
+                level: DiagnosticLevel::Warning,
+                code: "net.denylist_diagnostic",
+                message: "network deny lists are diagnostic unless deny = [\"*\"] requests deny-all egress".into(),
+            });
+        }
+
+        diagnostics
+    }
 }
 
 impl<'a> PolicyEvaluator<'a> {
@@ -191,11 +304,12 @@ impl<'a> PolicyEvaluator<'a> {
             Action::WriteFile { path } => self.evaluate_file(path, FileOperation::Write),
             Action::ConnectNetwork { host, port } => self.evaluate_network(host, port),
             Action::ReadEnv { name } => self.evaluate_env(name),
+            Action::CallMcpTool { server, tool } => self.evaluate_mcp_tool(server, tool),
         }
     }
 
     fn evaluate_process(&self, program: String, argv: Vec<String>) -> Decision {
-        let basename = program.rsplit('/').next().unwrap_or(&program);
+        let basename = program_basename(&program);
         let resource = Resource::Process {
             program: program.clone(),
             argv: argv.clone(),
@@ -500,6 +614,74 @@ impl<'a> PolicyEvaluator<'a> {
             message: "environment is clear by default and variable was not allowed".into(),
         })
     }
+
+    fn evaluate_mcp_tool(&self, server: String, tool: String) -> Decision {
+        let resource = Resource::McpTool {
+            server: server.clone(),
+            tool: tool.clone(),
+        };
+
+        let Some(server_policy) = self.policy.mcp.servers.get(&server) else {
+            return Decision::deny(DecisionReason {
+                rule_id: Some("mcp.server".into()),
+                resource,
+                action: ActionKind::McpToolCall,
+                matched_pattern: None,
+                message: format!("MCP server {server:?} is not configured"),
+            });
+        };
+
+        if let Some(pattern) = server_policy
+            .deny_tools
+            .iter()
+            .find(|pattern| pattern_matches(pattern, &tool))
+        {
+            return Decision::deny(DecisionReason {
+                rule_id: Some("mcp.deny_tools".into()),
+                resource,
+                action: ActionKind::McpToolCall,
+                matched_pattern: Some(pattern.clone()),
+                message: "MCP tool is explicitly denied".into(),
+            });
+        }
+
+        if let Some(rule) = server_policy
+            .rule
+            .iter()
+            .find(|rule| pattern_matches(&rule.tool, &tool))
+        {
+            let reason = DecisionReason {
+                rule_id: Some("mcp.rule".into()),
+                resource,
+                action: ActionKind::McpToolCall,
+                matched_pattern: Some(rule.tool.clone()),
+                message: format!("MCP tool matched rule for {}", rule.tool),
+            };
+            return mcp_rule_decision(rule.decision.unwrap_or(McpRuleDecision::Allow), reason);
+        }
+
+        if let Some(pattern) = server_policy
+            .allow_tools
+            .iter()
+            .find(|pattern| pattern_matches(pattern, &tool))
+        {
+            return Decision::allow(DecisionReason {
+                rule_id: Some("mcp.allow_tools".into()),
+                resource,
+                action: ActionKind::McpToolCall,
+                matched_pattern: Some(pattern.clone()),
+                message: "MCP tool matched allow list".into(),
+            });
+        }
+
+        Decision::deny(DecisionReason {
+            rule_id: Some("mcp.allow_tools".into()),
+            resource,
+            action: ActionKind::McpToolCall,
+            matched_pattern: None,
+            message: "MCP tool did not match allow list".into(),
+        })
+    }
 }
 
 impl Decision {
@@ -688,11 +870,33 @@ fn process_name_matches(pattern: &str, program: &str, basename: &str) -> bool {
     pattern == program || pattern == basename
 }
 
+fn program_names_match(left: &str, right: &str) -> bool {
+    process_name_matches(left, right, program_basename(right))
+        || process_name_matches(right, left, program_basename(left))
+}
+
+fn program_basename(program: &str) -> &str {
+    program.rsplit('/').next().unwrap_or(program)
+}
+
+fn risky_legacy_process_name(program: &str) -> bool {
+    let basename = program_basename(program);
+    basename.starts_with("python") || matches!(basename, "sh" | "bash")
+}
+
 fn process_rule_decision(decision: ProcessRuleDecision, reason: DecisionReason) -> Decision {
     match decision {
         ProcessRuleDecision::Allow => Decision::allow(reason),
         ProcessRuleDecision::Deny => Decision::deny(reason),
         ProcessRuleDecision::Ask => Decision::ask(reason),
+    }
+}
+
+fn mcp_rule_decision(decision: McpRuleDecision, reason: DecisionReason) -> Decision {
+    match decision {
+        McpRuleDecision::Allow => Decision::allow(reason),
+        McpRuleDecision::Deny => Decision::deny(reason),
+        McpRuleDecision::Ask => Decision::ask(reason),
     }
 }
 
@@ -812,6 +1016,14 @@ mod tests {
             [approval]
             require = ["process.unlisted"]
 
+            [mcp.github]
+            allow_tools = ["issue.read", "pull_request.read", "repo.file.read"]
+            deny_tools = ["pull_request.merge", "repo.file.write"]
+
+            [[mcp.github.rule]]
+            tool = "pull_request.comment"
+            decision = "ask"
+
             [trace]
             path = ".nobody/runs/latest.jsonl"
             redact = ["*TOKEN*", "*KEY*"]
@@ -830,6 +1042,17 @@ mod tests {
         );
         assert_eq!(policy.net.mode.as_deref(), Some("deny-by-default"));
         assert_eq!(policy.net.deny, Vec::<String>::new());
+        let github = policy.mcp.servers.get("github").unwrap();
+        assert_eq!(
+            github.allow_tools,
+            vec!["issue.read", "pull_request.read", "repo.file.read"]
+        );
+        assert_eq!(
+            github.deny_tools,
+            vec!["pull_request.merge", "repo.file.write"]
+        );
+        assert_eq!(github.rule[0].tool, "pull_request.comment");
+        assert_eq!(github.rule[0].decision, Some(McpRuleDecision::Ask));
         assert_eq!(policy.process.allow, vec!["echo", "git", "cargo", "rustc"]);
         assert_eq!(policy.process.deny, vec!["rm", "curl", "scp", "ssh"]);
         assert_eq!(policy.process.rule.len(), 2);
@@ -1060,6 +1283,55 @@ mod tests {
     }
 
     #[test]
+    fn warns_on_risky_legacy_process_allows_without_rules() {
+        let policy = Policy {
+            process: ProcessPolicy {
+                allow: vec!["python".into(), "sh".into(), "cargo".into()],
+                rule: vec![ProcessRule {
+                    program: "sh".into(),
+                    allow_args: vec!["-c".into()],
+                    deny_args: Vec::new(),
+                    decision: None,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let diagnostics = policy.diagnostics();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "process.risky_legacy_allow");
+        assert!(diagnostics[0].message.contains("\"python\""));
+    }
+
+    #[test]
+    fn warns_on_landlock_deny_carveouts() {
+        let policy = Policy {
+            fs: FsPolicy {
+                read: vec![".".into()],
+                write: vec!["./src".into()],
+                deny: vec![".env".into(), "./src/private.txt".into()],
+            },
+            ..Default::default()
+        };
+
+        let diagnostics = policy.diagnostics();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("under fs.read grant \".\""))
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("under fs.write grant \"./src\"")
+        }));
+    }
+
+    #[test]
     fn denies_env_by_pattern_before_allow() {
         let policy = Policy {
             env: EnvPolicy {
@@ -1093,6 +1365,54 @@ mod tests {
         });
 
         assert!(decision.is_allow());
+    }
+
+    #[test]
+    fn evaluates_mcp_tool_policy() {
+        let policy = Policy {
+            mcp: McpPolicy {
+                servers: BTreeMap::from([(
+                    "github".into(),
+                    McpServerPolicy {
+                        allow_tools: vec!["issue.read".into(), "pull_request.*".into()],
+                        deny_tools: vec!["pull_request.merge".into()],
+                        rule: vec![McpToolRule {
+                            tool: "pull_request.comment".into(),
+                            decision: Some(McpRuleDecision::Ask),
+                        }],
+                    },
+                )]),
+            },
+            ..Default::default()
+        };
+
+        let allow = policy.evaluator().evaluate(Action::CallMcpTool {
+            server: "github".into(),
+            tool: "issue.read".into(),
+        });
+        assert!(allow.is_allow());
+        assert_eq!(allow.reason().rule_id.as_deref(), Some("mcp.allow_tools"));
+
+        let deny = policy.evaluator().evaluate(Action::CallMcpTool {
+            server: "github".into(),
+            tool: "pull_request.merge".into(),
+        });
+        assert!(matches!(deny, Decision::Deny { .. }));
+        assert_eq!(deny.reason().rule_id.as_deref(), Some("mcp.deny_tools"));
+
+        let ask = policy.evaluator().evaluate(Action::CallMcpTool {
+            server: "github".into(),
+            tool: "pull_request.comment".into(),
+        });
+        assert!(matches!(ask, Decision::Ask { .. }));
+        assert_eq!(ask.reason().rule_id.as_deref(), Some("mcp.rule"));
+
+        let unconfigured = policy.evaluator().evaluate(Action::CallMcpTool {
+            server: "slack".into(),
+            tool: "chat.postMessage".into(),
+        });
+        assert!(matches!(unconfigured, Decision::Deny { .. }));
+        assert_eq!(unconfigured.reason().rule_id.as_deref(), Some("mcp.server"));
     }
 
     #[test]

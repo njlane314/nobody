@@ -85,12 +85,29 @@ and the allowed and denied variable names.
 Values are not recorded.
 .It Va sandbox.prepared
 Records the sandbox backend, whether it is enforced, and any warning.
+.It Va sandbox.prepare.failed
+Records a sandbox preparation failure before spawn.
+.It Va mcp.proxy.created
+Records MCP proxy configuration for a run.
+.It Va mcp.proxy.started
+Records MCP server process start.
+.It Va mcp.tool.allow , mcp.tool.deny , mcp.tool.ask
+Records an MCP tool-call decision.
+The event records server, tool, and request id, but not tool arguments.
+.It Va mcp.proxy.exited
+Records MCP server process exit status.
 .It Va process.started
 Records the spawned program and process id.
+.It Va process.start.failed
+Records a spawn failure before the child process starts.
 .It Va process.exited
 Records the child process exit code and success flag.
 .It Va run.completed
 Records the final run exit code and success flag.
+Denied setup paths and sandbox preparation failures are also recorded as
+completed failed runs with
+.Va success=false
+and a machine-readable reason.
 .El
 .Sh FILES
 .Bl -tag -width Ds
@@ -110,6 +127,21 @@ nobody trace show latest
 Show the latest run as JSONL:
 .Bd -literal
 nobody trace show latest --jsonl
+.Ed
+.Pp
+Explain the latest run as a summary and readable timeline:
+.Bd -literal
+nobody trace explain latest
+.Ed
+.Pp
+The explanation includes the command, policy path, sandbox backend, duration,
+exit status, and timeline entries such as:
+.Bd -literal
+process.exec ALLOW cargo test rule=process.rule.allow_args
+env.filtered allowed=7 denied=42
+sandbox.prepared backend=landlock enforced=true
+sandbox.prepared backend=landlock+netns enforced=true fs=true net=true network_mode=deny-all
+mcp.tool ALLOW github/issue.read rule=mcp.allow_tools
 .Ed
 .Sh STABILITY
 The

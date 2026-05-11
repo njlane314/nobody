@@ -46,6 +46,29 @@ impl EscapeDir {
         process_allow: &[&str],
         process_rules: &str,
     ) {
+        self.write_policy_with_network_and_process_rules(
+            read,
+            write,
+            deny,
+            process_allow,
+            process_rules,
+            "deny-by-default",
+            &[],
+            &[],
+        );
+    }
+
+    pub fn write_policy_with_network_and_process_rules(
+        &self,
+        read: &[&str],
+        write: &[&str],
+        deny: &[&str],
+        process_allow: &[&str],
+        process_rules: &str,
+        net_mode: &str,
+        net_allow: &[&str],
+        net_deny: &[&str],
+    ) {
         fs::write(
             self.path.join("nobody.toml"),
             format!(
@@ -56,9 +79,9 @@ write = [{}]
 deny = [{}]
 
 [net]
-mode = "deny-by-default"
-allow = []
-deny = []
+mode = {net_mode:?}
+allow = [{}]
+deny = [{}]
 
 [process]
 allow = [{}]
@@ -77,6 +100,8 @@ redact = ["*TOKEN*", "*KEY*", "Authorization"]
                 quoted(read),
                 quoted(write),
                 quoted(deny),
+                quoted(net_allow),
+                quoted(net_deny),
                 quoted(process_allow),
                 process_rules
             ),

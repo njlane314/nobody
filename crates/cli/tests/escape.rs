@@ -32,3 +32,6 @@ mod cargo_build_script_read;
 
 #[path = "../../../tests/escape/write_outside_repo.rs"]
 mod write_outside_repo;
+
+#[path = "../../../tests/escape/network_egress.rs"]
+mod network_egress;

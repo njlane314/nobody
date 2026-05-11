@@ -198,6 +198,46 @@ pub fn format_events(events: &[TraceEvent]) -> String {
     out
 }
 
+pub fn format_events_explain(events: &[TraceEvent]) -> String {
+    let mut out = String::new();
+    let Some(first) = events.first() else {
+        return out;
+    };
+
+    let last = events.last().unwrap_or(first);
+    let duration_ms = last.ts_ms.saturating_sub(first.ts_ms);
+
+    let _ = writeln!(&mut out, "Run {}", first.run_id);
+    if let Some(command) = events.iter().find_map(command_from_event) {
+        let _ = writeln!(&mut out, "Command: {command}");
+    }
+    if let Some(policy) = events.iter().find_map(policy_from_event) {
+        let _ = writeln!(&mut out, "Policy: {policy}");
+    }
+    if let Some(sandbox) = events.iter().find_map(sandbox_from_event) {
+        let _ = writeln!(&mut out, "Sandbox: {sandbox}");
+    }
+    let _ = writeln!(&mut out, "Duration: {:.3}s", duration_ms as f64 / 1000.0);
+    if let Some(exit) = events.iter().rev().find_map(exit_from_event) {
+        let _ = writeln!(&mut out, "Exit: {exit}");
+    }
+
+    out.push('\n');
+    out.push_str("Timeline:\n");
+
+    for event in events {
+        let elapsed_ms = event.ts_ms.saturating_sub(first.ts_ms);
+        let _ = writeln!(
+            &mut out,
+            "{:>8.3}s {}",
+            elapsed_ms as f64 / 1000.0,
+            explain_event(event)
+        );
+    }
+
+    out
+}
+
 pub fn format_events_jsonl(events: &[TraceEvent]) -> Result<String> {
     let mut out = String::new();
 
@@ -207,6 +247,265 @@ pub fn format_events_jsonl(events: &[TraceEvent]) -> Result<String> {
     }
 
     Ok(out)
+}
+
+fn explain_event(event: &TraceEvent) -> String {
+    if let Some(summary) = &event.decision {
+        let mut parts = vec![
+            decision_base_kind(&event.kind, &summary.decision),
+            summary.decision.to_uppercase(),
+        ];
+
+        if let Some(resource) = compact_resource(&summary.resource) {
+            parts.push(resource);
+        }
+
+        if let Some(rule_id) = &summary.rule_id {
+            parts.push(format!("rule={rule_id}"));
+        }
+
+        if let Some(pattern) = &summary.matched_pattern {
+            parts.push(format!("matched={pattern}"));
+        }
+
+        return parts.join(" ");
+    }
+
+    match event.kind.as_str() {
+        "run.created" => command_from_event(event)
+            .map(|command| format!("run.created {command}"))
+            .unwrap_or_else(|| event.kind.clone()),
+        "policy.loaded" => {
+            let path = event
+                .data
+                .get("path")
+                .map(value_to_text)
+                .unwrap_or_else(|| "(unknown)".into());
+            let trace = event
+                .data
+                .get("trace_path")
+                .map(value_to_text)
+                .unwrap_or_else(|| "(unknown)".into());
+            format!("policy.loaded path={path} trace={trace}")
+        }
+        "env.filtered" => {
+            let allowed = event
+                .data
+                .get("allowed_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            let denied = event
+                .data
+                .get("denied_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            format!("env.filtered allowed={allowed} denied={denied}")
+        }
+        "sandbox.prepared" => sandbox_from_event(event)
+            .map(|sandbox| format!("sandbox.prepared {sandbox}"))
+            .unwrap_or_else(|| event.kind.clone()),
+        "sandbox.prepare.failed" | "process.start.failed" | "process.wait.failed" => {
+            let detail = event_detail(event);
+            if detail.is_empty() {
+                event.kind.clone()
+            } else {
+                format!("{} {detail}", event.kind)
+            }
+        }
+        "mcp.proxy.created" => {
+            let server = event
+                .data
+                .get("server")
+                .and_then(|value| value.as_str())
+                .unwrap_or("(unknown)");
+            format!("mcp.proxy.created server={server}")
+        }
+        "mcp.proxy.started" => {
+            let server = event
+                .data
+                .get("server")
+                .and_then(|value| value.as_str())
+                .unwrap_or("(unknown)");
+            let pid = event
+                .data
+                .get("pid")
+                .and_then(|value| value.as_u64())
+                .map(|pid| format!(" pid={pid}"))
+                .unwrap_or_default();
+            format!("mcp.proxy.started server={server}{pid}")
+        }
+        "mcp.proxy.exited" => exit_from_event(event)
+            .map(|exit| format!("mcp.proxy.exited {exit}"))
+            .unwrap_or_else(|| event.kind.clone()),
+        "process.started" => {
+            let program = event
+                .data
+                .get("program")
+                .and_then(|value| value.as_str())
+                .unwrap_or("(unknown)");
+            let pid = event
+                .data
+                .get("pid")
+                .and_then(|value| value.as_u64())
+                .map(|pid| format!(" pid={pid}"))
+                .unwrap_or_default();
+            format!("process.started {program}{pid}")
+        }
+        "process.exited" | "run.completed" => exit_from_event(event)
+            .map(|exit| format!("{} {exit}", event.kind))
+            .unwrap_or_else(|| event.kind.clone()),
+        _ => {
+            let detail = event_detail(event);
+            if detail.is_empty() {
+                event.kind.clone()
+            } else {
+                format!("{} {detail}", event.kind)
+            }
+        }
+    }
+}
+
+fn decision_base_kind(kind: &str, decision: &str) -> String {
+    kind.strip_suffix(&format!(".{decision}"))
+        .unwrap_or(kind)
+        .to_owned()
+}
+
+fn compact_resource(resource: &Value) -> Option<String> {
+    match resource.get("kind").and_then(|value| value.as_str())? {
+        "process" => {
+            let program = resource.get("program")?.as_str()?;
+            let argv = resource
+                .get("argv")
+                .and_then(|value| value.as_array())
+                .map(|argv| {
+                    argv.iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            if argv.is_empty() {
+                Some(program.to_owned())
+            } else {
+                Some(format!("{} {}", program, argv.join(" ")))
+            }
+        }
+        "file" => resource
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        "network" => {
+            let host = resource.get("host")?.as_str()?;
+            let port = resource.get("port")?.as_u64()?;
+            Some(format!("{host}:{port}"))
+        }
+        "env" => resource
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        "mcp_tool" => {
+            let server = resource.get("server")?.as_str()?;
+            let tool = resource.get("tool")?.as_str()?;
+            Some(format!("{server}/{tool}"))
+        }
+        _ => None,
+    }
+}
+
+fn command_from_event(event: &TraceEvent) -> Option<String> {
+    if !matches!(event.kind.as_str(), "run.created" | "mcp.proxy.created") {
+        return None;
+    }
+
+    event
+        .data
+        .get("command")
+        .and_then(|value| value.as_array())
+        .map(|command| {
+            command
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+}
+
+fn policy_from_event(event: &TraceEvent) -> Option<String> {
+    match event.kind.as_str() {
+        "policy.loaded" => event.data.get("path").map(value_to_text),
+        "mcp.proxy.created" => event.data.get("policy_path").map(value_to_text),
+        _ => None,
+    }
+}
+
+fn sandbox_from_event(event: &TraceEvent) -> Option<String> {
+    if event.kind != "sandbox.prepared" {
+        return None;
+    }
+
+    let backend = event.data.get("backend")?.as_str()?;
+    let enforced = event
+        .data
+        .get("enforced")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mut sandbox = format!("backend={backend} enforced={enforced}");
+    if let Some(filesystem_enforced) = event
+        .data
+        .get("filesystem_enforced")
+        .and_then(|value| value.as_bool())
+    {
+        sandbox.push_str(&format!(" fs={filesystem_enforced}"));
+    }
+    if let Some(network_enforced) = event
+        .data
+        .get("network_enforced")
+        .and_then(|value| value.as_bool())
+    {
+        sandbox.push_str(&format!(" net={network_enforced}"));
+    }
+    if let Some(network_mode) = event
+        .data
+        .get("network_mode")
+        .and_then(|value| value.as_str())
+    {
+        sandbox.push_str(&format!(" network_mode={network_mode}"));
+    }
+    if let Some(warning) = event.data.get("warning").and_then(|value| value.as_str()) {
+        sandbox.push_str(&format!(" warning={warning}"));
+    }
+    Some(sandbox)
+}
+
+fn exit_from_event(event: &TraceEvent) -> Option<String> {
+    if !matches!(
+        event.kind.as_str(),
+        "process.exited" | "run.completed" | "mcp.proxy.exited"
+    ) {
+        return None;
+    }
+
+    let code = event
+        .data
+        .get("code")
+        .and_then(|value| value.as_i64())
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "signal".into());
+    let success = event
+        .data
+        .get("success")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    Some(format!("code={code} success={success}"))
+}
+
+fn value_to_text(value: &Value) -> String {
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
 }
 
 pub fn latest_run_events(events: &[TraceEvent]) -> Vec<TraceEvent> {
@@ -256,6 +555,14 @@ fn event_detail(event: &TraceEvent) -> String {
 
     if let Some(path) = event.data.get("path").and_then(|value| value.as_str()) {
         return path.to_owned();
+    }
+
+    if let Some(error) = event.data.get("error").and_then(|value| value.as_str()) {
+        return format!("error={error}");
+    }
+
+    if let Some(reason) = event.data.get("reason").and_then(|value| value.as_str()) {
+        return format!("reason={reason}");
     }
 
     String::new()
@@ -319,6 +626,11 @@ fn resource_detail(resource: &Value) -> Option<String> {
             .get("name")
             .and_then(|value| value.as_str())
             .map(|name| format!("env={name}")),
+        "mcp_tool" => {
+            let server = resource.get("server")?.as_str()?;
+            let tool = resource.get("tool")?.as_str()?;
+            Some(format!("tool={server}/{tool}"))
+        }
         _ => None,
     }
 }
@@ -358,6 +670,116 @@ mod tests {
 
         assert!(out.contains("Run run-1"));
         assert!(out.contains("run.created echo hello"));
+    }
+
+    #[test]
+    fn explains_events_for_terminal() {
+        let events = vec![
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-1".into(),
+                parent_event_id: None,
+                ts_ms: 1000,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "run.created".into(),
+                decision: None,
+                data: json!({ "command": ["cargo", "test"] }),
+            },
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-2".into(),
+                parent_event_id: None,
+                ts_ms: 1001,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "policy.loaded".into(),
+                decision: None,
+                data: json!({ "path": "nobody.toml", "trace_path": ".nobody/runs/latest.jsonl" }),
+            },
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-3".into(),
+                parent_event_id: None,
+                ts_ms: 1002,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "process.exec.allow".into(),
+                decision: Some(DecisionSummary {
+                    decision: "allow".into(),
+                    rule_id: Some("process.rule.allow_args".into()),
+                    resource: json!({
+                        "kind": "process",
+                        "program": "cargo",
+                        "argv": ["test"],
+                    }),
+                    action: "process_exec".into(),
+                    matched_pattern: Some("test".into()),
+                    message: "process arguments matched allow rule for cargo".into(),
+                }),
+                data: json!({ "program": "cargo", "argv": ["test"] }),
+            },
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-4".into(),
+                parent_event_id: None,
+                ts_ms: 1003,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "env.filtered".into(),
+                decision: None,
+                data: json!({ "allowed_count": 7, "denied_count": 42 }),
+            },
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-5".into(),
+                parent_event_id: None,
+                ts_ms: 1004,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "sandbox.prepared".into(),
+                decision: None,
+                data: json!({ "backend": "landlock", "enforced": true }),
+            },
+            TraceEvent {
+                schema_version: "nobody.trace.v1".into(),
+                run_id: "run-1".into(),
+                event_id: "evt-6".into(),
+                parent_event_id: None,
+                ts_ms: 1010,
+                actor: Actor {
+                    kind: "runtime".into(),
+                    id: "local".into(),
+                },
+                kind: "run.completed".into(),
+                decision: None,
+                data: json!({ "code": 0, "success": true }),
+            },
+        ];
+
+        let out = format_events_explain(&events);
+
+        assert!(out.contains("Command: cargo test"));
+        assert!(out.contains("Policy: nobody.toml"));
+        assert!(out.contains("Sandbox: backend=landlock enforced=true"));
+        assert!(out.contains("Exit: code=0 success=true"));
+        assert!(out.contains("process.exec ALLOW cargo test rule=process.rule.allow_args"));
+        assert!(out.contains("env.filtered allowed=7 denied=42"));
     }
 
     #[test]

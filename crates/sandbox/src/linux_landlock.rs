@@ -1,6 +1,6 @@
 use crate::{
-    PreparedSandbox, PreparedSandboxBackend, ResolvedSandboxSpec, SandboxSpec, SandboxStatus,
-    reject_deny_carveouts, resolve_spec, support_read_paths,
+    NetworkSandboxPlan, PreparedSandbox, PreparedSandboxBackend, ResolvedSandboxSpec, SandboxSpec,
+    SandboxStatus, linux_netns, reject_deny_carveouts, resolve_spec, support_read_paths,
 };
 use anyhow::{Context, Result, bail};
 use landlock::{
@@ -17,35 +17,61 @@ use std::process::{Child, Command};
 struct PreparedLandlockSandbox {
     read_paths: Vec<PathBuf>,
     write_paths: Vec<PathBuf>,
+    network_plan: NetworkSandboxPlan,
+    network_mode: String,
+    warning: Option<String>,
 }
 
 pub(crate) fn prepare(spec: &SandboxSpec) -> Result<PreparedSandbox> {
     let resolved = resolve_spec(spec)?;
     let (read_paths, write_paths) = landlock_paths(resolved)?;
+    let network_plan = spec.network.plan();
+    let network_mode = spec.network.mode_label().into();
+    let warning = match &network_plan {
+        NetworkSandboxPlan::Diagnostic { warning } => Some(warning.clone()),
+        NetworkSandboxPlan::Disabled | NetworkSandboxPlan::DenyAll => None,
+    };
 
     Ok(Box::new(PreparedLandlockSandbox {
         read_paths,
         write_paths,
+        network_plan,
+        network_mode,
+        warning,
     }))
 }
 
 impl PreparedSandboxBackend for PreparedLandlockSandbox {
     fn status(&self) -> SandboxStatus {
+        let network_enforced = matches!(self.network_plan, NetworkSandboxPlan::DenyAll);
         SandboxStatus {
-            backend: "landlock".into(),
+            backend: if network_enforced {
+                "landlock+netns".into()
+            } else {
+                "landlock".into()
+            },
             enforced: true,
-            warning: None,
+            filesystem_enforced: true,
+            network_enforced,
+            network_mode: self.network_mode.clone(),
+            warning: self.warning.clone(),
         }
     }
 
     fn spawn(&self, command: &mut Command) -> Result<Child> {
         let read_paths = self.read_paths.clone();
         let write_paths = self.write_paths.clone();
+        let network_plan = self.network_plan.clone();
 
         // Install Landlock in the child after fork and before exec so the
         // parent runtime can keep writing traces and supervising the process.
         unsafe {
             command.pre_exec(move || {
+                if matches!(network_plan, NetworkSandboxPlan::DenyAll) {
+                    linux_netns::deny_all_network()
+                        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+                }
+
                 enforce_landlock(&read_paths, &write_paths)
                     .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))
             });

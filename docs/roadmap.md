@@ -1,7 +1,8 @@
 # Roadmap
 
-This repo is currently a prototype. The company version is a serious systems
-product: a Unix-style execution primitive for the agent era.
+This repo now has the first stable local runtime surface. The company version
+is a broader systems product: a Unix-style execution primitive for the agent
+era.
 
 ## Future command surface
 
@@ -53,35 +54,51 @@ nobody runner register
 - 0.4: Escape-test suite.
 - 0.5: Process and environment hardening.
 - 0.6: Trace viewer and policy diagnostics polish.
-- 0.7: Network egress enforcement.
+- 0.7: Linux deny-all network egress enforcement.
 - 0.8: Agent profiles.
-- 0.9: MCP proxy.
-- 1.0: Stable local agent runtime.
+- 0.9: MCP stdio proxy.
+- 1.0: Stable local agent runtime. Current.
 
-## Next implementation steps
+## Post-1.0 implementation steps
 
 1. Validate the Linux Landlock backend in CI and document the ABI v3 kernel requirement.
 2. Make `tests/escape/` the first-class guarantee suite for interpreter and build-system escapes.
-3. Polish trace explanation and policy diagnostics.
-4. Add network namespace/proxy enforcement only after filesystem escape tests are stable.
-5. Add profile-based `nobody init` defaults for Rust, Node, Python, readonly review, and CI agents.
+3. Add a network proxy/namespace bridge for host allowlists.
+4. Add terminal approval gates for policy decisions that should ask instead of deny.
+5. Add network and MCP proxy hardening for non-stdio transports and host allowlists.
 
 ## Current guarantees
 
 `nobody` currently enforces process allow/deny checks, argument-aware process
 rules, and environment filtering before the child process starts. On Linux, it
 also installs a Landlock filesystem boundary for policies that can be expressed
-as granted read/write paths.
+as granted read/write paths and can deny all network egress with a fresh network
+namespace when `net.deny = ["*"]`.
 
 `nobody` currently records structured trace events for run lifecycle, process
-decisions, environment filtering, and sandbox backend status.
+decisions, failed setup paths, environment filtering, and sandbox backend
+status. `nobody trace explain` summarizes the latest run as a readable
+timeline.
+
+`nobody doctor` reports the policy shape, current sandbox backend, filesystem
+enforcement status, network enforcement status, warnings, and whether the local
+runtime is ready to run under the selected policy.
+
+`nobody init` generates profile-based starter policies for Rust, Node, Python,
+readonly review, and CI workflows. Profiles write plain TOML and include only
+filesystem paths that already exist in the current directory.
+
+`nobody mcp proxy` mediates JSON-RPC stdio `tools/call` messages with
+`[mcp.<server>]` allow/deny policy. It records tool-call decisions without tool
+arguments.
 
 `nobody` currently simulates filesystem and network policy decisions for
 diagnostics. Filesystem simulation may express deny carve-outs that Landlock
 cannot enforce under an already-granted path, so the Linux runtime fails closed
-for those policies. Network decisions explain what policy says; they are not
-operating system enforcement yet.
+for those policies. Network host allowlists explain what policy says; they are
+not raw egress allowlist enforcement yet.
 
-`nobody` does not yet enforce network, MCP, browser, or cross-OS sandbox
-boundaries. Network is intentionally after filesystem enforcement and escape
-tests because proxy-only controls would be too easy to overstate.
+`nobody` does not yet enforce browser, cross-OS sandbox boundaries, network
+host allowlists, or MCP traffic that is not routed through `nobody mcp proxy`.
+Proxy-only network controls remain future work because they would be too easy
+to overstate as raw socket containment.

@@ -10,7 +10,7 @@ is the TOML policy format read by
 .Xr nobody 1 .
 The file declares the capabilities available to a run: process execution,
 environment inheritance, filesystem grants, network diagnostics, approval
-requirements, and trace output.
+requirements, MCP tool grants, and trace output.
 .Pp
 Unknown tables or fields are rejected.
 Missing tables use conservative empty defaults, except where noted below.
@@ -89,16 +89,20 @@ Array of denied host or
 patterns.
 .El
 .Pp
-Network decisions are currently diagnostic.
-Traffic is not blocked by the runtime yet.
+On Linux,
+.Va deny
+containing
+.Qq *
+requests a fresh network namespace before exec and denies all host egress for
+the child process and its descendants.
+Host allowlists remain diagnostic until a later egress proxy or namespace
+bridge exists.
 Explicit deny rules win.
 With
 .Va mode
 set to
 .Qq deny-by-default ,
-or with a non-empty
-.Va allow
-list, endpoints must match
+endpoints must match
 .Va net.allow .
 .Ss process
 Process execution policy.
@@ -201,6 +205,39 @@ Array of approval gate names.
 .Pp
 Approval fields are parsed for schema stability.
 The current runtime does not stop for interactive approval.
+.Ss mcp
+MCP tool-call policy.
+Each server is declared as a nested table such as
+.Va [mcp.github] .
+.Bl -tag -width "allow_tools" -compact
+.It Va allow_tools
+Array of allowed MCP tool-name patterns.
+.It Va deny_tools
+Array of denied MCP tool-name patterns.
+.It Va rule
+Array of tool rule tables, written as
+.Va [[mcp.github.rule]] .
+.El
+.Pp
+.Cm nobody mcp proxy
+enforces these rules for JSON-RPC stdio messages whose method is
+.Qq tools/call .
+.Va deny_tools
+wins over rules and allow lists.
+Calls that do not match
+.Va allow_tools
+are denied.
+.Pp
+A rule has a required
+.Va tool
+pattern and optional
+.Va decision
+of
+.Qq allow ,
+.Qq deny ,
+or
+.Qq ask .
+Ask decisions fail closed until approval gates exist.
 .Ss trace
 Trace output policy.
 .Bl -tag -width "redact" -compact

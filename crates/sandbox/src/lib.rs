@@ -14,6 +14,8 @@ use std::path::{Component, Path};
 
 #[cfg(target_os = "linux")]
 mod linux_landlock;
+#[cfg(target_os = "linux")]
+mod linux_netns;
 mod noop;
 
 pub use noop::NoopSandbox;
@@ -24,12 +26,30 @@ pub struct SandboxSpec {
     pub fs_read: Vec<PathBuf>,
     pub fs_write: Vec<PathBuf>,
     pub fs_deny: Vec<PathBuf>,
+    pub network: NetworkSandboxSpec,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NetworkSandboxSpec {
+    pub mode: Option<String>,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkSandboxPlan {
+    Disabled,
+    DenyAll,
+    Diagnostic { warning: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SandboxStatus {
     pub backend: String,
     pub enforced: bool,
+    pub filesystem_enforced: bool,
+    pub network_enforced: bool,
+    pub network_mode: String,
     pub warning: Option<String>,
 }
 
@@ -68,6 +88,61 @@ impl SandboxSpec {
             fs_read: fs_read.iter().map(PathBuf::from).collect(),
             fs_write: fs_write.iter().map(PathBuf::from).collect(),
             fs_deny: fs_deny.iter().map(PathBuf::from).collect(),
+            network: NetworkSandboxSpec::default(),
+        }
+    }
+
+    pub fn from_policy_parts(
+        working_dir: impl Into<PathBuf>,
+        fs_read: &[String],
+        fs_write: &[String],
+        fs_deny: &[String],
+        net_mode: Option<String>,
+        net_allow: &[String],
+        net_deny: &[String],
+    ) -> Self {
+        Self {
+            working_dir: working_dir.into(),
+            fs_read: fs_read.iter().map(PathBuf::from).collect(),
+            fs_write: fs_write.iter().map(PathBuf::from).collect(),
+            fs_deny: fs_deny.iter().map(PathBuf::from).collect(),
+            network: NetworkSandboxSpec {
+                mode: net_mode,
+                allow: net_allow.to_vec(),
+                deny: net_deny.to_vec(),
+            },
+        }
+    }
+}
+
+impl NetworkSandboxSpec {
+    pub fn plan(&self) -> NetworkSandboxPlan {
+        if self.deny.iter().any(|pattern| pattern == "*") {
+            return NetworkSandboxPlan::DenyAll;
+        }
+
+        let deny_by_default = self.mode.as_deref() == Some("deny-by-default");
+
+        if deny_by_default {
+            return NetworkSandboxPlan::Diagnostic {
+                warning: "network deny-by-default policy is diagnostic unless deny = [\"*\"] requests deny-all namespace enforcement".into(),
+            };
+        }
+
+        if !self.deny.is_empty() {
+            return NetworkSandboxPlan::Diagnostic {
+                warning: "network deny lists are diagnostic unless deny = [\"*\"] requests deny-all namespace enforcement".into(),
+            };
+        }
+
+        NetworkSandboxPlan::Disabled
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        match self.plan() {
+            NetworkSandboxPlan::Disabled => "disabled",
+            NetworkSandboxPlan::DenyAll => "deny-all",
+            NetworkSandboxPlan::Diagnostic { .. } => "diagnostic",
         }
     }
 }
@@ -297,6 +372,7 @@ mod tests {
             fs_read: Vec::new(),
             fs_write: Vec::new(),
             fs_deny: Vec::new(),
+            network: NetworkSandboxSpec::default(),
         };
         let prepared = NoopSandbox::default().prepare(&spec).unwrap();
         let status = prepared.status();
@@ -318,6 +394,7 @@ mod tests {
             fs_read: vec![PathBuf::from(".")],
             fs_write: Vec::new(),
             fs_deny: vec![PathBuf::from(".env")],
+            network: NetworkSandboxSpec::default(),
         };
 
         let error = resolve_spec(&spec).unwrap_err().to_string();

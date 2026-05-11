@@ -90,9 +90,11 @@ impl Runtime {
         match process_decision {
             Decision::Allow { .. } => {}
             Decision::Deny { reason } => {
+                self.complete_failed_run("process_denied", &reason.message)?;
                 bail!("process denied by policy: {}", reason.message);
             }
             Decision::Ask { request } => {
+                self.complete_failed_run("approval_required", &request.reason.message)?;
                 bail!(
                     "process requires approval but approval gates are not implemented: {}",
                     request.reason.message
@@ -125,13 +127,30 @@ impl Runtime {
             }
         }
 
-        let sandbox_spec = SandboxSpec::from_policy_paths(
+        let sandbox_spec = SandboxSpec::from_policy_parts(
             std::env::current_dir().context("failed to resolve current directory")?,
             &self.policy.fs.read,
             &self.policy.fs.write,
             &self.policy.fs.deny,
+            self.policy.net.mode.clone(),
+            &self.policy.net.allow,
+            &self.policy.net.deny,
         );
-        let prepared_sandbox = self.sandbox.prepare(&sandbox_spec)?;
+        let prepared_sandbox = match self.sandbox.prepare(&sandbox_spec) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let message = error.to_string();
+                self.trace.event(
+                    "sandbox.prepare.failed",
+                    None,
+                    json!({
+                        "error": message,
+                    }),
+                )?;
+                self.complete_failed_run("sandbox_prepare_failed", &message)?;
+                return Err(error).context("failed to prepare sandbox");
+            }
+        };
         let sandbox_status = prepared_sandbox.status();
 
         if let Some(warning) = &sandbox_status.warning {
@@ -144,13 +163,29 @@ impl Runtime {
             json!({
                 "backend": sandbox_status.backend,
                 "enforced": sandbox_status.enforced,
+                "filesystem_enforced": sandbox_status.filesystem_enforced,
+                "network_enforced": sandbox_status.network_enforced,
+                "network_mode": sandbox_status.network_mode,
                 "warning": sandbox_status.warning,
             }),
         )?;
 
-        let mut child = prepared_sandbox
-            .spawn(&mut command)
-            .with_context(|| format!("failed to start command: {program}"))?;
+        let mut child = match prepared_sandbox.spawn(&mut command) {
+            Ok(child) => child,
+            Err(error) => {
+                let message = error.to_string();
+                self.trace.event(
+                    "process.start.failed",
+                    None,
+                    json!({
+                        "program": program,
+                        "error": message,
+                    }),
+                )?;
+                self.complete_failed_run("process_start_failed", &message)?;
+                return Err(error).with_context(|| format!("failed to start command: {program}"));
+            }
+        };
 
         self.trace.event(
             "process.started",
@@ -161,9 +196,23 @@ impl Runtime {
             }),
         )?;
 
-        let status = child
-            .wait()
-            .with_context(|| format!("failed to wait for command: {program}"))?;
+        let status = match child.wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let message = error.to_string();
+                self.trace.event(
+                    "process.wait.failed",
+                    None,
+                    json!({
+                        "program": program,
+                        "error": message,
+                    }),
+                )?;
+                self.complete_failed_run("process_wait_failed", &message)?;
+                return Err(error)
+                    .with_context(|| format!("failed to wait for command: {program}"));
+            }
+        };
 
         self.trace.event(
             "process.exited",
@@ -188,6 +237,19 @@ impl Runtime {
             code: status.code(),
             success: status.success(),
         })
+    }
+
+    fn complete_failed_run(&mut self, reason: &str, error: &str) -> Result<()> {
+        self.trace.event(
+            "run.completed",
+            None,
+            json!({
+                "code": null,
+                "success": false,
+                "reason": reason,
+                "error": error,
+            }),
+        )
     }
 
     fn prepare_env(&self) -> PreparedEnv {

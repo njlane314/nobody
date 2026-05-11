@@ -9,10 +9,19 @@
 prepares a sandbox before spawning the requested command.
 The selected backend is recorded in the trace as
 .Va sandbox.prepared .
+The same backend preparation is reported by
+.Cm nobody doctor
+so users can see whether the selected policy is enforceable on the current
+host before running an agent.
 .Pp
-The current sandbox boundary is filesystem-focused.
+The current sandbox boundary is filesystem-focused, with one Linux network
+primitive for deny-all egress.
 Process policy and environment filtering happen in the runtime before spawn.
-Network, MCP, browser, and secret enforcement are not sandboxed yet.
+Host allowlists, browser, and secret enforcement are not sandboxed yet.
+MCP tool calls are mediated separately by
+.Xr nobody 1
+when traffic is routed through
+.Cm mcp proxy .
 .Sh LINUX LANDLOCK
 On Linux,
 .Nm
@@ -26,6 +35,11 @@ events and supervise the process.
 The backend requires fully enforced Landlock ABI v3 filesystem rights.
 If the kernel or host configuration reports partial enforcement, no
 enforcement, or no Landlock support, the run fails.
+The failure is recorded as
+.Va sandbox.prepare.failed
+followed by a failed
+.Va run.completed
+event.
 .Pp
 Read support paths are added for command startup and dynamic linking.
 The backend derives paths from
@@ -36,6 +50,22 @@ and common system locations such as
 .Pa /lib ,
 and selected device files.
 Policy read/write grants are still the application-specific boundary.
+.Sh LINUX NETWORK NAMESPACE
+On Linux, a policy with
+.Va net.deny
+containing
+.Qq *
+requests deny-all network enforcement.
+The backend creates a fresh network namespace in the child before exec.
+That namespace has no host routes, so outbound egress is blocked for the
+process and descendants.
+.Pp
+This is not host allowlist enforcement.
+Policies such as
+.Va net.allow
+=
+.Qq github.com:443
+are currently diagnostic until a later proxy or namespace bridge exists.
 .Sh PATH RULES
 .Va fs.read
 and
@@ -82,13 +112,14 @@ succeeded.
 The current sandbox does not provide:
 .Bl -bullet -compact
 .It
-network egress enforcement;
+network host allowlist enforcement;
 .It
-seccomp or namespace isolation;
+seccomp or namespace isolation beyond deny-all networking;
 .It
 macOS sandbox profiles;
 .It
-MCP/tool-call mediation;
+MCP transports not routed through
+.Cm nobody mcp proxy ;
 .It
 browser-control mediation;
 .It
@@ -106,6 +137,15 @@ or
 .Qq noop .
 .It Va enforced
 Boolean enforcement status.
+.It Va filesystem_enforced
+Whether the filesystem boundary is active.
+.It Va network_enforced
+Whether network egress enforcement is active.
+.It Va network_mode
+Network backend mode, such as
+.Qq deny-all
+or
+.Qq diagnostic .
 .It Va warning
 Backend warning, if any.
 .El

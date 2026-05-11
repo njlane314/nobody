@@ -195,6 +195,7 @@ dependencies = [
  "clap",
  "nobody-policy",
  "nobody-runtime",
+ "nobody-sandbox",
  "nobody-trace",
  "serde_json",
 ]
@@ -225,6 +226,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "landlock",
+ "libc",
  "serde",
 ]
 

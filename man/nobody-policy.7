@@ -31,6 +31,20 @@ When an allow list is non-empty, unmatched resources are denied for that
 capability.
 The current approval model is parsed but not yet used to pause for interactive
 approval.
+.Sh DIAGNOSTICS
+.Cm nobody policy check
+parses a policy and reports its process, filesystem, environment, and trace
+shape.
+It also emits warnings for policy declarations that are likely to surprise an
+operator.
+.Pp
+Current warnings include risky legacy process allows, such as
+.Qq python
+or
+.Qq sh
+without a matching
+.Va [[process.rule]] ,
+and Linux Landlock deny carve-outs underneath granted filesystem trees.
 .Sh CAPABILITIES
 .Ss Process
 Process policy controls the initial command requested through
@@ -84,10 +98,26 @@ for backend details.
 Network policy names hosts or endpoints that would be allowed or denied.
 The current runtime can simulate
 .Cm net.connect
-decisions, but it does not yet enforce network egress.
+decisions.
+On Linux, a policy with
+.Va net.deny
+containing
+.Qq *
+requests a fresh network namespace before exec and denies all host egress for
+the child process and its descendants.
+Host allowlists remain diagnostic until a later egress proxy or namespace
+bridge exists.
 .Ss MCP and Tools
-MCP and tool-call mediation are part of the intended policy surface, but the
-current local runtime does not proxy MCP servers or enforce tool-level grants.
+MCP tool policy is enforced for stdio traffic routed through
+.Cm nobody mcp proxy .
+The policy lives under server-specific tables such as
+.Va [mcp.github] .
+.Va deny_tools
+wins over rules and allow lists, and unmatched tools are denied.
+.Pp
+Traffic that is not routed through
+.Cm nobody mcp proxy
+is outside this enforcement path.
 .Ss Secrets
 Secrets are currently handled indirectly through filesystem denies and
 environment filtering.

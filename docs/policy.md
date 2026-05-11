@@ -4,9 +4,10 @@
 
 The current prototype parses agent, task, filesystem, network, process,
 environment, approval, and trace sections. Process policy, environment
-filtering, and Linux filesystem boundaries are enforced today. Network,
-approval, and tool sections describe the intended policy surface and are parsed
-so the file shape can stabilize before those enforcement backends land.
+filtering, Linux filesystem boundaries, and explicit Linux deny-all network
+egress are enforced today. Host-level network allowlists, approval, and tool
+sections describe the intended policy surface and are parsed so the file shape
+can stabilize before those enforcement backends land.
 
 ## Example
 
@@ -53,6 +54,14 @@ deny = ["*TOKEN*", "*KEY*", "AWS_*", "DATABASE_URL", "SSH_AUTH_SOCK"]
 [approval]
 require = ["process.unlisted"]
 
+[mcp.github]
+allow_tools = ["issue.read", "pull_request.read", "repo.file.read"]
+deny_tools = ["pull_request.merge", "repo.file.write"]
+
+[[mcp.github.rule]]
+tool = "pull_request.comment"
+decision = "ask"
+
 [trace]
 path = ".nobody/runs/latest.jsonl"
 redact = ["*TOKEN*", "*KEY*", "Authorization"]
@@ -76,7 +85,31 @@ Simulate a decision without running a command:
 nobody policy simulate nobody.toml -- process.exec curl
 nobody policy simulate nobody.toml -- env.read GITHUB_TOKEN
 nobody policy simulate nobody.toml -- fs.read .env
+nobody policy simulate nobody.toml -- mcp.tool github issue.read
 ```
+
+Check a policy file and summarize the declared shape:
+
+```sh
+nobody policy check nobody.toml
+```
+
+`policy check` reports the trace path, process allow/deny lists, process rules,
+filesystem grants, network mode, environment filtering, and warnings. Current
+warnings flag risky legacy process allows such as `python` or `sh` without a
+matching `[[process.rule]]`, filesystem deny carve-outs that Linux Landlock
+cannot enforce under granted path trees, and network policy shapes that are
+diagnostic until a later egress proxy exists.
+
+Generate a starter policy with a built-in profile:
+
+```sh
+nobody init --profile rust-coding-agent
+```
+
+Profiles are plain TOML templates. They include only filesystem paths that
+exist in the current directory so generated policies do not rely on impossible
+Landlock deny carve-outs.
 
 ## Processes
 
@@ -159,11 +192,40 @@ Trace events include variable names and counts, but not values.
 
 ## Network
 
-Network policy is parsed and can be evaluated by the policy crate, but network
-traffic is not enforced by the runtime yet.
+Network policy is parsed and can be evaluated by the policy crate.
 
-With `mode = "deny-by-default"`, endpoints must match `net.allow` unless they
-match an explicit `net.deny` rule. Explicit deny rules win.
+On Linux, `deny = ["*"]` requests a fresh network namespace before the child
+execs. That namespace starts without host routes, so outbound egress is denied
+for the process and its descendants. The trace records this as
+`network_mode="deny-all"` and `network_enforced=true`.
+
+Host allowlists are not raw-socket enforcement yet. With
+`mode = "deny-by-default"`, endpoints must match `net.allow` for policy
+simulation unless they match an explicit `net.deny` rule, but runtime
+allowlist enforcement remains diagnostic until a later proxy or namespace
+bridge exists.
+
+## MCP
+
+MCP policy is declared under `[mcp.<server>]`.
+
+```toml
+[mcp.github]
+allow_tools = ["issue.read", "pull_request.read", "repo.file.read"]
+deny_tools = ["pull_request.merge", "repo.file.write"]
+
+[[mcp.github.rule]]
+tool = "pull_request.comment"
+decision = "ask"
+```
+
+`nobody mcp proxy <server> -- <command>` enforces these rules for JSON-RPC
+stdio messages with `method = "tools/call"`. `deny_tools` wins first. Tool
+rules can return `allow`, `deny`, or `ask`; ask fails closed until approval
+gates are implemented. Calls that do not match `allow_tools` are denied.
+
+Tool names support simple `*` wildcards. Trace events record server, tool, and
+request id, but not tool arguments.
 
 ## Trace path
 

@@ -1,9 +1,19 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use nobody_policy::{Action, ActionKind, Decision, DecisionReason, Policy, Resource};
+use nobody_policy::{
+    Action, ActionKind, Decision, DecisionReason, DiagnosticLevel, Policy, Resource,
+};
 use nobody_runtime::{RunSpec, Runtime};
-use nobody_trace::{format_events, format_events_jsonl, latest_run_events, read_events};
+use nobody_sandbox::{SandboxSpec, platform_default_sandbox};
+use nobody_trace::{
+    TraceEvent, format_events, format_events_explain, format_events_jsonl, latest_run_events,
+    read_events,
+};
+use std::fs;
 use std::path::PathBuf;
+
+mod mcp;
+mod profiles;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -18,9 +28,55 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Doctor(DoctorArgs),
+    Init(InitArgs),
+    Mcp(McpArgs),
     Run(RunArgs),
     Policy(PolicyArgs),
     Trace(TraceArgs),
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    #[arg(short, long, default_value = "nobody.toml")]
+    policy: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct InitArgs {
+    #[arg(long)]
+    profile: Option<String>,
+
+    #[arg(short, long, default_value = "nobody.toml")]
+    output: PathBuf,
+
+    #[arg(long)]
+    force: bool,
+
+    #[arg(long)]
+    list_profiles: bool,
+}
+
+#[derive(Debug, Args)]
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    Proxy(McpProxyArgs),
+}
+
+#[derive(Debug, Args)]
+struct McpProxyArgs {
+    server: String,
+
+    #[arg(short, long, default_value = "nobody.toml")]
+    policy: PathBuf,
+
+    #[arg(last = true, required = true)]
+    command: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -68,6 +124,7 @@ struct TraceArgs {
 #[derive(Debug, Subcommand)]
 enum TraceCommand {
     Show(TraceShowArgs),
+    Explain(TraceExplainArgs),
 }
 
 #[derive(Debug, Args)]
@@ -79,14 +136,153 @@ struct TraceShowArgs {
     target: String,
 }
 
+#[derive(Debug, Args)]
+struct TraceExplainArgs {
+    #[arg(default_value = "latest")]
+    target: String,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Doctor(args) => doctor(args),
+        Command::Init(args) => init(args),
+        Command::Mcp(args) => mcp_command(args),
         Command::Run(args) => run(args),
         Command::Policy(args) => policy(args),
         Command::Trace(args) => trace(args),
     }
+}
+
+fn doctor(args: DoctorArgs) -> Result<()> {
+    let policy = Policy::load(&args.policy)?;
+    let diagnostics = policy.diagnostics();
+
+    println!("nobody doctor");
+    println!("os: {}", std::env::consts::OS);
+    println!("policy: {} ok", args.policy.display());
+    println!("trace: {}", policy.trace_path().display());
+    println!();
+    println!("runtime:");
+    println!("  process allow: {}", list_or_none(&policy.process.allow));
+    println!("  process deny: {}", list_or_none(&policy.process.deny));
+    println!("  process rules: {}", process_rules_or_none(&policy));
+    println!("  environment clear: {}", policy.env.clear);
+    println!("  environment allow: {}", list_or_none(&policy.env.allow));
+    println!("  environment deny: {}", list_or_none(&policy.env.deny));
+    println!("  mcp servers: {}", mcp_servers_or_none(&policy));
+    println!();
+    println!("sandbox:");
+
+    let sandbox_spec = SandboxSpec::from_policy_parts(
+        std::env::current_dir().context("failed to resolve current directory")?,
+        &policy.fs.read,
+        &policy.fs.write,
+        &policy.fs.deny,
+        policy.net.mode.clone(),
+        &policy.net.allow,
+        &policy.net.deny,
+    );
+    let sandbox = platform_default_sandbox();
+    let sandbox_status = sandbox
+        .prepare(&sandbox_spec)
+        .map(|prepared| prepared.status());
+
+    match &sandbox_status {
+        Ok(status) => {
+            println!("  backend: {}", status.backend);
+            println!("  enforced: {}", status.enforced);
+            println!(
+                "  filesystem: {}",
+                enforcement_label(status.filesystem_enforced)
+            );
+            println!(
+                "  network: {} ({})",
+                enforcement_label(status.network_enforced),
+                status.network_mode
+            );
+            if let Some(warning) = &status.warning {
+                println!("  warning: {warning}");
+            }
+        }
+        Err(error) => {
+            println!("  error: {error}");
+        }
+    }
+
+    if diagnostics.is_empty() {
+        println!();
+        println!("policy warnings: none");
+    } else {
+        println!();
+        println!("policy warnings:");
+        for diagnostic in &diagnostics {
+            let level = match diagnostic.level {
+                DiagnosticLevel::Warning => "warning",
+            };
+            println!("  {level}[{}]: {}", diagnostic.code, diagnostic.message);
+        }
+    }
+
+    println!();
+    if sandbox_status.is_ok() {
+        let sandbox_warning = sandbox_status
+            .as_ref()
+            .ok()
+            .and_then(|status| status.warning.as_ref())
+            .is_some();
+        if diagnostics.is_empty() && !sandbox_warning {
+            println!("status: ok");
+        } else {
+            println!("status: warnings");
+        }
+        Ok(())
+    } else {
+        println!("status: error");
+        bail!("runtime doctor failed")
+    }
+}
+
+fn init(args: InitArgs) -> Result<()> {
+    if args.list_profiles {
+        for profile in profiles::summaries() {
+            println!("{:<22} {}", profile.name, profile.description);
+        }
+        return Ok(());
+    }
+
+    if args.output.exists() && !args.force {
+        bail!(
+            "refusing to overwrite {}; pass --force to replace it",
+            args.output.display()
+        );
+    }
+
+    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+    let profile_name = args
+        .profile
+        .as_deref()
+        .unwrap_or_else(|| profiles::detect(&cwd));
+    let rendered = profiles::render(profile_name, &cwd)?;
+
+    if let Some(parent) = args
+        .output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory: {}", parent.display()))?;
+    }
+
+    fs::write(&args.output, rendered.policy)
+        .with_context(|| format!("failed to write policy: {}", args.output.display()))?;
+
+    println!("wrote {}", args.output.display());
+    println!("profile: {}", rendered.name);
+    println!("description: {}", rendered.description);
+
+    Ok(())
 }
 
 fn run(args: RunArgs) -> Result<()> {
@@ -105,15 +301,21 @@ fn run(args: RunArgs) -> Result<()> {
     Ok(())
 }
 
+fn mcp_command(args: McpArgs) -> Result<()> {
+    match args.command {
+        McpCommand::Proxy(args) => mcp::proxy(mcp::ProxySpec {
+            server: args.server,
+            policy_path: args.policy,
+            command: args.command,
+        }),
+    }
+}
+
 fn policy(args: PolicyArgs) -> Result<()> {
     match args.command {
         PolicyCommand::Check(args) => {
             let loaded = Policy::load(&args.policy)?;
-            println!(
-                "policy ok: {} (trace: {})",
-                args.policy.display(),
-                loaded.trace_path().display()
-            );
+            print_policy_check(&args.policy, &loaded);
             Ok(())
         }
         PolicyCommand::Simulate(args) => {
@@ -129,23 +331,7 @@ fn policy(args: PolicyArgs) -> Result<()> {
 fn trace(args: TraceArgs) -> Result<()> {
     match args.command {
         TraceCommand::Show(args) => {
-            let path = match args.target.as_str() {
-                "latest" => PathBuf::from(".nobody/runs/latest.jsonl"),
-                other => PathBuf::from(other),
-            };
-
-            let events = read_events(&path)
-                .with_context(|| format!("failed to read trace: {}", path.display()))?;
-
-            if events.is_empty() {
-                bail!("trace is empty: {}", path.display());
-            }
-
-            let shown = if args.target == "latest" {
-                latest_run_events(&events)
-            } else {
-                events
-            };
+            let shown = load_trace_events(&args.target)?;
 
             if args.jsonl {
                 print!("{}", format_events_jsonl(&shown)?);
@@ -154,7 +340,32 @@ fn trace(args: TraceArgs) -> Result<()> {
             }
             Ok(())
         }
+        TraceCommand::Explain(args) => {
+            let shown = load_trace_events(&args.target)?;
+            print!("{}", format_events_explain(&shown));
+            Ok(())
+        }
     }
+}
+
+fn load_trace_events(target: &str) -> Result<Vec<TraceEvent>> {
+    let path = match target {
+        "latest" => PathBuf::from(".nobody/runs/latest.jsonl"),
+        other => PathBuf::from(other),
+    };
+
+    let events =
+        read_events(&path).with_context(|| format!("failed to read trace: {}", path.display()))?;
+
+    if events.is_empty() {
+        bail!("trace is empty: {}", path.display());
+    }
+
+    Ok(if target == "latest" {
+        latest_run_events(&events)
+    } else {
+        events
+    })
 }
 
 fn parse_action(parts: &[String]) -> Result<Action> {
@@ -188,6 +399,14 @@ fn parse_action(parts: &[String]) -> Result<Action> {
             let endpoint = parts.get(1).context("net.connect requires host:port")?;
             let (host, port) = parse_endpoint(endpoint)?;
             Ok(Action::ConnectNetwork { host, port })
+        }
+        "mcp.tool" => {
+            let server = parts.get(1).context("mcp.tool requires a server name")?;
+            let tool = parts.get(2).context("mcp.tool requires a tool name")?;
+            Ok(Action::CallMcpTool {
+                server: server.clone(),
+                tool: tool.clone(),
+            })
         }
         other => bail!("unknown action kind: {other}"),
     }
@@ -228,6 +447,120 @@ fn print_decision(decision: &Decision) {
             "note: filesystem decisions are diagnostic; run enforcement depends on the active sandbox backend"
         );
     }
+
+    if matches!(reason.resource, Resource::Network { .. }) {
+        println!(
+            "note: network host allowlists are diagnostic; deny = [\"*\"] is the current Linux egress enforcement primitive"
+        );
+    }
+
+    if matches!(reason.resource, Resource::McpTool { .. }) {
+        println!(
+            "note: MCP tool decisions are enforced only for traffic routed through nobody mcp proxy"
+        );
+    }
+}
+
+fn print_policy_check(path: &std::path::Path, policy: &Policy) {
+    println!("policy ok: {}", path.display());
+    println!("trace: {}", policy.trace_path().display());
+    println!();
+    println!("process:");
+    println!("  allow: {}", list_or_none(&policy.process.allow));
+    println!("  deny: {}", list_or_none(&policy.process.deny));
+    println!("  rules: {}", process_rules_or_none(policy));
+    println!("filesystem:");
+    println!("  read: {}", list_or_none(&policy.fs.read));
+    println!("  write: {}", list_or_none(&policy.fs.write));
+    println!("  deny: {}", list_or_none(&policy.fs.deny));
+    println!("network:");
+    println!(
+        "  mode: {}",
+        policy.net.mode.as_deref().unwrap_or("(unspecified)")
+    );
+    println!("  allow: {}", list_or_none(&policy.net.allow));
+    println!("  deny: {}", list_or_none(&policy.net.deny));
+    println!("environment:");
+    println!("  clear: {}", policy.env.clear);
+    println!("  allow: {}", list_or_none(&policy.env.allow));
+    println!("  deny: {}", list_or_none(&policy.env.deny));
+    println!("mcp:");
+    println!("  servers: {}", mcp_servers_or_none(policy));
+
+    let diagnostics = policy.diagnostics();
+    if diagnostics.is_empty() {
+        println!();
+        println!("warnings: none");
+    } else {
+        println!();
+        println!("warnings:");
+        for diagnostic in diagnostics {
+            let level = match diagnostic.level {
+                DiagnosticLevel::Warning => "warning",
+            };
+            println!("  {level}[{}]: {}", diagnostic.code, diagnostic.message);
+        }
+    }
+}
+
+fn mcp_servers_or_none(policy: &Policy) -> String {
+    if policy.mcp.servers.is_empty() {
+        return "(none)".into();
+    }
+
+    policy
+        .mcp
+        .servers
+        .iter()
+        .map(|(name, server)| {
+            format!(
+                "{} allow=[{}] deny=[{}] rules={}",
+                name,
+                list_or_none(&server.allow_tools),
+                list_or_none(&server.deny_tools),
+                server.rule.len()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn enforcement_label(enforced: bool) -> &'static str {
+    if enforced { "enforced" } else { "diagnostic" }
+}
+
+fn list_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        "(none)".into()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn process_rules_or_none(policy: &Policy) -> String {
+    if policy.process.rule.is_empty() {
+        return "(none)".into();
+    }
+
+    policy
+        .process
+        .rule
+        .iter()
+        .map(|rule| {
+            let mut parts = vec![rule.program.clone()];
+            if !rule.allow_args.is_empty() {
+                parts.push(format!("allow_args=[{}]", rule.allow_args.join(", ")));
+            }
+            if !rule.deny_args.is_empty() {
+                parts.push(format!("deny_args=[{}]", rule.deny_args.join(", ")));
+            }
+            if let Some(decision) = rule.decision {
+                parts.push(format!("decision={decision:?}").to_lowercase());
+            }
+            parts.join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn action_label(reason: &DecisionReason) -> &'static str {
@@ -240,6 +573,7 @@ fn action_label(reason: &DecisionReason) -> &'static str {
         },
         Resource::Network { .. } => "net.connect",
         Resource::Env { .. } => "env.read",
+        Resource::McpTool { .. } => "mcp.tool",
     }
 }
 
@@ -255,5 +589,6 @@ fn resource_label(reason: &DecisionReason) -> String {
         Resource::File { path } => path.display().to_string(),
         Resource::Network { host, port } => format!("{host}:{port}"),
         Resource::Env { name } => name.clone(),
+        Resource::McpTool { server, tool } => format!("{server}/{tool}"),
     }
 }

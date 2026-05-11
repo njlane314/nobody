@@ -6,6 +6,24 @@
 .Nd run agents without ambient authority
 .Sh SYNOPSIS
 .Nm
+.Cm doctor
+.Op Fl p Ar policy
+.Nm
+.Cm init
+.Op Fl -profile Ar name
+.Op Fl o Ar output
+.Op Fl -force
+.Nm
+.Cm init
+.Fl -list-profiles
+.Nm
+.Cm mcp proxy
+.Ar server
+.Op Fl p Ar policy
+.Fl -
+.Ar command
+.Op Ar argument ...
+.Nm
 .Cm run
 .Op Fl p Ar policy
 .Fl -
@@ -24,6 +42,9 @@
 .Cm trace show
 .Op Fl -jsonl
 .Op Ar latest | file
+.Nm
+.Cm trace explain
+.Op Ar latest | file
 .Sh DESCRIPTION
 .Nm
 is a least-privilege execution runtime for AI agents and other autonomous
@@ -36,14 +57,69 @@ The current runtime enforces process policy and environment filtering on every
 platform.
 On Linux it also uses Landlock to enforce filesystem read and write grants when
 the policy can be represented as granted path trees.
+When
+.Va net.deny
+contains
+.Qq * ,
+Linux runs also create a fresh network namespace for deny-all egress.
 On non-Linux hosts, filesystem policy is diagnostic only and
 .Nm
 prints a warning before spawning the command.
 .Pp
-Network, MCP, browser-control, and secret-broker enforcement are planned but are
-not implemented in this milestone.
+Network host allowlists, browser-control, and secret-broker enforcement are
+planned beyond the current stdio MCP proxy milestone.
 .Sh COMMANDS
 .Bl -tag -width Ds
+.It Cm doctor Op Fl p Ar policy
+Report the current local runtime status for
+.Ar policy .
+The report includes operating system, policy path, trace path, process rules,
+environment filtering, configured MCP servers, sandbox backend, filesystem
+enforcement status, network enforcement status, and policy warnings.
+The default policy path is
+.Pa nobody.toml .
+.It Xo
+.Cm init
+.Op Fl -profile Ar name
+.Op Fl o Ar output
+.Op Fl -force
+.Xc
+Write a starter
+.Pa nobody.toml
+policy.
+If
+.Fl -profile
+is omitted,
+.Nm
+detects Rust, Node, or Python project files and otherwise uses the
+.Qq readonly-review-agent
+profile.
+The output path defaults to
+.Pa nobody.toml .
+Existing files are not overwritten unless
+.Fl -force
+is passed.
+.It Cm init Fl -list-profiles
+List built-in profiles.
+.It Xo
+.Cm mcp proxy
+.Ar server
+.Op Fl p Ar policy
+.Fl -
+.Ar command
+.Op Ar argument ...
+.Xc
+Run
+.Ar command
+as an MCP stdio server and mediate JSON-RPC
+.Qq tools/call
+messages for
+.Ar server .
+Tool calls are checked against
+.Va [mcp.<server>]
+policy before forwarding.
+Denied calls are not forwarded and receive JSON-RPC error responses when the
+request has an id.
 .It Xo
 .Cm run
 .Op Fl p Ar policy
@@ -58,10 +134,12 @@ under
 The default policy path is
 .Pa nobody.toml .
 If the requested process is denied, the command is not spawned.
+The denial is still recorded as a completed failed run in the trace.
 .It Cm policy check Op Ar policy
 Parse
 .Ar policy
-and report the trace path that would be used.
+and report the trace path, process rules, filesystem grants, network mode,
+environment filtering shape, and policy warnings.
 The default policy path is
 .Pa nobody.toml .
 .It Xo
@@ -80,6 +158,7 @@ Supported action forms are:
 .It Cm fs.read Ar path
 .It Cm fs.write Ar path
 .It Cm net.connect Ar host:port
+.It Cm mcp.tool Ar server Ar tool
 .El
 .It Xo
 .Cm trace show
@@ -96,13 +175,42 @@ With
 .Fl -jsonl ,
 print selected events as newline-delimited JSON instead of the compact terminal
 view.
+.It Cm trace explain Op Ar latest | file
+Explain trace events as a run summary and readable timeline.
+The default target is
+.Cm latest .
 .El
 .Sh OPTIONS
 .Bl -tag -width Ds
+.It Fl -profile Ar name
+Select an
+.Cm init
+profile.
+Built-in profiles are
+.Qq rust-coding-agent ,
+.Qq node-coding-agent ,
+.Qq python-coding-agent ,
+.Qq readonly-review-agent ,
+and
+.Qq ci-agent .
+.It Fl o , Fl -output Ar file
+Write
+.Cm init
+output to
+.Ar file .
+.It Fl -force
+Allow
+.Cm init
+to replace an existing output file.
+.It Fl -list-profiles
+List built-in profiles and exit.
 .It Fl p , Fl -policy Ar file
 Read policy from
 .Ar file .
 Used by
+.Cm doctor ,
+.Cm mcp proxy ,
+and
 .Cm run .
 .It Fl -jsonl
 Print trace events as JSONL.
@@ -158,6 +266,10 @@ without an ordinary exit code.
 .El
 .Sh EXAMPLES
 .Bd -literal
+nobody doctor
+nobody init --profile rust-coding-agent
+nobody init --list-profiles
+nobody mcp proxy github --policy nobody.toml -- github-mcp-server
 nobody run -- echo hello
 nobody run --policy nobody.toml -- echo hello
 nobody policy check nobody.toml
@@ -165,8 +277,10 @@ nobody policy simulate nobody.toml -- fs.read .env
 nobody policy simulate nobody.toml -- fs.write README.md
 nobody policy simulate nobody.toml -- process.exec curl
 nobody policy simulate nobody.toml -- net.connect github.com:443
+nobody policy simulate nobody.toml -- mcp.tool github issue.read
 nobody trace show latest
 nobody trace show latest --jsonl
+nobody trace explain latest
 .Ed
 .Sh DIAGNOSTICS
 Common diagnostics include:
@@ -180,12 +294,19 @@ or did not match a non-empty
 .Va process.allow .
 .It Qq trace is empty
 .Cm trace show
+or
+.Cm trace explain
 read a trace file with no events.
 .It Qq Landlock filesystem enforcement is only available on Linux
 The host selected the diagnostic no-op sandbox backend.
 .It Qq cannot enforce fs.deny
 Linux Landlock cannot express a deny carve-out below an already-granted path.
 Grant narrower read/write paths instead.
+.It Qq MCP tool is explicitly denied
+.Cm mcp proxy
+blocked a
+.Qq tools/call
+request before forwarding it to the MCP server.
 .El
 .Sh SEE ALSO
 .Xr nobody-trace 5 ,

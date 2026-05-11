@@ -1,4 +1,7 @@
-use crate::{PreparedSandbox, PreparedSandboxBackend, Sandbox, SandboxSpec, SandboxStatus};
+use crate::{
+    NetworkSandboxPlan, PreparedSandbox, PreparedSandboxBackend, Sandbox, SandboxSpec,
+    SandboxStatus,
+};
 use anyhow::{Context, Result};
 use std::process::{Child, Command};
 
@@ -21,15 +24,24 @@ impl Default for NoopSandbox {
 }
 
 impl Sandbox for NoopSandbox {
-    fn prepare(&self, _spec: &SandboxSpec) -> Result<PreparedSandbox> {
+    fn prepare(&self, spec: &SandboxSpec) -> Result<PreparedSandbox> {
+        let mut warning = self.reason.clone();
+        if let NetworkSandboxPlan::DenyAll | NetworkSandboxPlan::Diagnostic { .. } =
+            spec.network.plan()
+        {
+            warning.push_str("; network policy is diagnostic on this platform");
+        }
+
         Ok(Box::new(PreparedNoopSandbox {
-            reason: self.reason.clone(),
+            warning,
+            network_mode: spec.network.mode_label().into(),
         }))
     }
 }
 
 struct PreparedNoopSandbox {
-    reason: String,
+    warning: String,
+    network_mode: String,
 }
 
 impl PreparedSandboxBackend for PreparedNoopSandbox {
@@ -37,7 +49,10 @@ impl PreparedSandboxBackend for PreparedNoopSandbox {
         SandboxStatus {
             backend: "noop".into(),
             enforced: false,
-            warning: Some(self.reason.clone()),
+            filesystem_enforced: false,
+            network_enforced: false,
+            network_mode: self.network_mode.clone(),
+            warning: Some(self.warning.clone()),
         }
     }
 

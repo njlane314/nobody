@@ -33,11 +33,13 @@ before the runtime spawns a process.
 environment variables. It does not record values.
 
 `sandbox.prepared` records the selected sandbox backend and whether filesystem
-enforcement is active for the run.
+and network enforcement are active for the run.
 
 `process.started` and `process.exited` record process lifecycle details.
 
-`run.completed` records the final exit status.
+`run.completed` records the final exit status. If a run is denied before spawn
+or fails while preparing the sandbox, `run.completed` records `success=false`,
+a machine-readable `reason`, and an error message.
 
 ## Viewer
 
@@ -46,10 +48,46 @@ Show the latest trace in a compact terminal view:
 ```sh
 nobody trace show latest
 nobody trace show latest --jsonl
+nobody trace explain latest
 ```
 
 The default view is a compact human-readable summary. `--jsonl` prints the
 selected events as newline-delimited JSON.
+
+`trace explain` turns the selected run into an incident-style summary with the
+command, policy path, sandbox backend, duration, exit status, and a readable
+timeline of decisions and runtime events.
+
+```text
+Run run-...
+Command: cargo test
+Policy: nobody.toml
+Sandbox: backend=landlock+netns enforced=true fs=true net=true network_mode=deny-all
+Duration: 8.320s
+Exit: code=0 success=true
+
+Timeline:
+   0.000s run.created cargo test
+   0.004s policy.loaded path=nobody.toml trace=.nobody/runs/latest.jsonl
+   0.007s process.exec ALLOW cargo test rule=process.rule.allow_args
+   0.009s env.filtered allowed=7 denied=42
+   0.015s sandbox.prepared backend=landlock+netns enforced=true fs=true net=true network_mode=deny-all
+   8.320s run.completed code=0 success=true
+```
+
+A denied setup path still has a trace footer:
+
+```text
+Timeline:
+   0.000s run.created curl https://example.com
+   0.004s policy.loaded path=nobody.toml trace=.nobody/runs/latest.jsonl
+   0.007s process.exec DENY curl rule=process.deny matched=curl
+   0.008s run.completed code=signal success=false
+```
+
+MCP proxy runs additionally record `mcp.proxy.created`, `mcp.proxy.started`,
+`mcp.tool.allow` or `mcp.tool.deny`, and `mcp.proxy.exited`. Tool-call events
+record server, tool, and request id, but not tool arguments.
 
 ## Current limitations
 
@@ -57,5 +95,7 @@ The trace is append-only by convention in the current prototype. It is not yet
 sealed, signed, replayable, or protected against local modification.
 
 The trace schema is designed for more detailed filesystem, network, approval,
-and MCP events. The current runtime records sandbox preparation but does not yet
-record every file access attempted inside the child process.
+and MCP events. The current runtime records sandbox preparation, deny-all
+network backend status, and MCP proxy decisions, but it does not yet record
+every file access attempted inside the child process or every socket attempt
+inside the network namespace.
