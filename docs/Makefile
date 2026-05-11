@@ -5,7 +5,7 @@ SPHINXOPTS ?=
 SOURCEDIR = design
 BUILDDIR = _build/design
 
-.PHONY: design-html html clean
+.PHONY: design-html design-pdf html pdf clean
 
 design-html:
 	$(SPHINXBUILD) -b singlehtml "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS)
@@ -19,6 +19,12 @@ design-html:
 
 html:
 	$(SPHINXBUILD) -b html "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
+
+design-pdf:
+	$(SPHINXBUILD) -M latexpdf "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS)
+	cp "$(BUILDDIR)/latex/nobody-design.pdf" design.pdf
+
+pdf: design-pdf
 
 clean:
 	rm -rf _build _static

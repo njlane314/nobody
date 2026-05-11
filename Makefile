@@ -20,7 +20,7 @@ run:
 	$(CARGO) run --package nobody-cli -- run -- echo hello
 
 install:
-	$(CARGO) install --path crates/nobody-cli --root "$(DESTDIR)$(PREFIX)"
+	$(CARGO) install --path crates/cli --root "$(DESTDIR)$(PREFIX)"
 
 clean:
 	$(CARGO) clean

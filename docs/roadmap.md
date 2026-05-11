@@ -47,13 +47,24 @@ nobody org runs
 nobody runner register
 ```
 
+## Release sequence
+
+- 0.3: Linux filesystem enforcement.
+- 0.4: Escape-test suite.
+- 0.5: Process and environment hardening.
+- 0.6: Trace viewer and policy diagnostics polish.
+- 0.7: Network egress enforcement.
+- 0.8: Agent profiles.
+- 0.9: MCP proxy.
+- 1.0: Stable local agent runtime.
+
 ## Next implementation steps
 
 1. Validate the Linux Landlock backend in CI and document the ABI v3 kernel requirement.
-2. Add policy profiles for common coding-agent workflows.
-3. Expand escape tests for denied files, symlinks, descendants, and package scripts.
-4. Add network namespace/proxy enforcement.
-5. Add MCP proxying.
+2. Make `tests/escape/` the first-class guarantee suite for interpreter and build-system escapes.
+3. Add conservative process-rule models before broadening process policy.
+4. Polish trace explanation and policy diagnostics.
+5. Add network namespace/proxy enforcement only after filesystem escape tests are stable.
 
 ## Current guarantees
 
@@ -72,4 +83,5 @@ for those policies. Network decisions explain what policy says; they are not
 operating system enforcement yet.
 
 `nobody` does not yet enforce network, MCP, browser, or cross-OS sandbox
-boundaries.
+boundaries. Network is intentionally after filesystem enforcement and escape
+tests because proxy-only controls would be too easy to overstate.

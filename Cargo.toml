@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "crates/nobody-cli",
-    "crates/nobody-policy",
-    "crates/nobody-runtime",
-    "crates/nobody-sandbox",
-    "crates/nobody-trace",
+    "crates/cli",
+    "crates/policy",
+    "crates/runtime",
+    "crates/sandbox",
+    "crates/trace",
 ]
-default-members = ["crates/nobody-cli"]
+default-members = ["crates/cli"]
 resolver = "3"
 
 [workspace.package]

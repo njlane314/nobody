@@ -1,10 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 
 #[cfg(any(target_os = "linux", test))]
-use anyhow::bail;
+use anyhow::{Context, bail};
 #[cfg(any(target_os = "linux", test))]
 use std::collections::BTreeSet;
 #[cfg(any(target_os = "linux", test))]
@@ -13,7 +13,10 @@ use std::env;
 use std::path::{Component, Path};
 
 #[cfg(target_os = "linux")]
-mod linux;
+mod linux_landlock;
+mod noop;
+
+pub use noop::NoopSandbox;
 
 #[derive(Debug, Clone)]
 pub struct SandboxSpec {
@@ -39,10 +42,6 @@ pub trait Sandbox {
 pub trait PreparedSandboxBackend {
     fn status(&self) -> SandboxStatus;
     fn spawn(&self, command: &mut Command) -> Result<Child>;
-}
-
-pub struct NoopSandbox {
-    reason: String,
 }
 
 pub struct LinuxLandlockSandbox;
@@ -73,33 +72,11 @@ impl SandboxSpec {
     }
 }
 
-impl NoopSandbox {
-    pub fn new(reason: impl Into<String>) -> Self {
-        Self {
-            reason: reason.into(),
-        }
-    }
-}
-
-impl Default for NoopSandbox {
-    fn default() -> Self {
-        Self::new("filesystem sandbox backend is noop; filesystem policy is diagnostic only")
-    }
-}
-
-impl Sandbox for NoopSandbox {
-    fn prepare(&self, _spec: &SandboxSpec) -> Result<PreparedSandbox> {
-        Ok(Box::new(PreparedNoopSandbox {
-            reason: self.reason.clone(),
-        }))
-    }
-}
-
 impl Sandbox for LinuxLandlockSandbox {
     fn prepare(&self, spec: &SandboxSpec) -> Result<PreparedSandbox> {
         #[cfg(target_os = "linux")]
         {
-            linux::prepare(spec)
+            linux_landlock::prepare(spec)
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -110,24 +87,6 @@ impl Sandbox for LinuxLandlockSandbox {
             )
             .prepare(spec)
         }
-    }
-}
-
-struct PreparedNoopSandbox {
-    reason: String,
-}
-
-impl PreparedSandboxBackend for PreparedNoopSandbox {
-    fn status(&self) -> SandboxStatus {
-        SandboxStatus {
-            backend: "noop".into(),
-            enforced: false,
-            warning: Some(self.reason.clone()),
-        }
-    }
-
-    fn spawn(&self, command: &mut Command) -> Result<Child> {
-        command.spawn().context("failed to spawn command")
     }
 }
 

@@ -4,14 +4,15 @@ Roadmap
 
 The implementation should move from semantics to enforcement:
 
-1. stabilize the trace schema,
-2. add policy explanation and simulation commands,
-3. add filesystem decision simulation,
-4. introduce a Linux sandbox crate interface,
-5. enforce Landlock filesystem policy,
-6. add escape tests for denied files and descendants,
-7. validate Landlock in Linux CI,
-8. add deny-default network mediation,
-9. add MCP proxying,
-10. add secret brokering, and
-11. add replay and diff views.
+1. 0.3: Linux filesystem enforcement,
+2. 0.4: escape-test suite,
+3. 0.5: process and environment hardening,
+4. 0.6: trace viewer and policy diagnostics polish,
+5. 0.7: network egress enforcement,
+6. 0.8: agent profiles,
+7. 0.9: MCP proxy, and
+8. 1.0: stable local agent runtime.
+
+The immediate post-Landlock priority is the escape suite, not network.  The
+tests should prove that allowed interpreters and build systems remain unable to
+read denied files.

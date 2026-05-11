@@ -191,17 +191,17 @@ direction matters: policy types should not depend on Linux confinement, and
 trace readers should not depend on the command-line interface.</p>
 <section id="workspace-layout">
 <h3><span class="section-number">4.1. </span>Workspace Layout<a class="headerlink" href="#workspace-layout" title="Link to this heading">¶</a></h3>
-<p>The current workspace is split into focused crates:</p>
+<p>The current workspace is split into focused source directories:</p>
 <dl class="simple">
-<dt><code class="docutils literal notranslate"><span class="pre">nobody-cli</span></code></dt><dd><p>Command parsing and terminal-facing behavior.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">crates/cli</span></code></dt><dd><p>Command parsing and terminal-facing behavior.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">nobody-policy</span></code></dt><dd><p>Policy structures, validation, and decision evaluation.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">crates/policy</span></code></dt><dd><p>Policy structures, validation, and decision evaluation.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">nobody-runtime</span></code></dt><dd><p>Run lifecycle, process supervision, and environment filtering.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">crates/runtime</span></code></dt><dd><p>Run lifecycle, process supervision, and environment filtering.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">nobody-sandbox</span></code></dt><dd><p>Platform sandbox interfaces plus noop and Linux Landlock backends.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">crates/sandbox</span></code></dt><dd><p>Platform sandbox interfaces plus noop and Linux Landlock backends.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">nobody-trace</span></code></dt><dd><p>Trace event schema, JSONL writing, and compact trace display.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">crates/trace</span></code></dt><dd><p>Trace event schema, JSONL writing, and compact trace display.</p>
 </dd>
 </dl>
 </section>

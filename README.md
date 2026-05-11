@@ -71,6 +71,10 @@ Currently recorded:
 - sandbox backend and enforcement status
 - filesystem and network policy simulation
 
+Filesystem escape tests live under `tests/escape/` and cover denied reads
+through shells, interpreters, symlinks, traversal, package scripts, and build
+scripts.
+
 Not enforced yet:
 
 - filesystem read/write boundaries on non-Linux hosts
@@ -82,6 +86,7 @@ Not enforced yet:
 ## Documentation
 
 - [Design note](docs/design.html)
+- [Design PDF](docs/design.pdf)
 - [Policy format](docs/policy.md)
 - [Trace format](docs/trace.md)
 - [Examples](docs/examples.md)

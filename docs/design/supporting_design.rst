@@ -10,21 +10,21 @@ trace readers should not depend on the command-line interface.
 Workspace Layout
 ================
 
-The current workspace is split into focused crates:
+The current workspace is split into focused source directories:
 
-``nobody-cli``
+``crates/cli``
    Command parsing and terminal-facing behavior.
 
-``nobody-policy``
+``crates/policy``
    Policy structures, validation, and decision evaluation.
 
-``nobody-runtime``
+``crates/runtime``
    Run lifecycle, process supervision, and environment filtering.
 
-``nobody-sandbox``
+``crates/sandbox``
    Platform sandbox interfaces plus noop and Linux Landlock backends.
 
-``nobody-trace``
+``crates/trace``
    Trace event schema, JSONL writing, and compact trace display.
 
 ======================

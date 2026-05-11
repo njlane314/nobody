@@ -42,8 +42,8 @@ impl PreparedSandboxBackend for PreparedLandlockSandbox {
         let read_paths = self.read_paths.clone();
         let write_paths = self.write_paths.clone();
 
-        // Landlock restrictions must be installed in the child after fork and before exec
-        // so the parent runtime can keep writing traces and supervising the process.
+        // Install Landlock in the child after fork and before exec so the
+        // parent runtime can keep writing traces and supervising the process.
         unsafe {
             command.pre_exec(move || {
                 enforce_landlock(&read_paths, &write_paths)

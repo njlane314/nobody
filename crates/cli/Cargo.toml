@@ -11,9 +11,9 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-nobody-policy = { path = "../nobody-policy" }
-nobody-runtime = { path = "../nobody-runtime" }
-nobody-trace = { path = "../nobody-trace" }
+nobody-policy = { path = "../policy" }
+nobody-runtime = { path = "../runtime" }
+nobody-trace = { path = "../trace" }
 
 [dev-dependencies]
 serde_json.workspace = true
